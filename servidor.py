@@ -249,6 +249,20 @@ def iniciar_banco():
                 print(f"  SENHA INICIAL DO ADMIN (anote): {senha_ini}")
         c.execute("INSERT INTO usuarios(nome, login, senha, perfil, trocar_senha, criado_em) VALUES (?,?,?,?,1,?)",
                   ("Administrador", "admin", hash_senha(senha_ini), "admin", agora()))
+    # Usuários iniciais definidos pela variável USUARIOS_INICIAIS (JSON). Só cria quem ainda não existe.
+    try:
+        iniciais = json.loads(os.environ.get("USUARIOS_INICIAIS") or "[]")
+    except ValueError:
+        iniciais = []
+        print("  AVISO: USUARIOS_INICIAIS não é um JSON válido.")
+    for x in iniciais:
+        login = (x.get("login") or "").strip().lower()
+        if not login or not x.get("senha") or c.execute("SELECT 1 FROM usuarios WHERE login=?", (login,)).fetchone():
+            continue
+        c.execute("INSERT INTO usuarios(nome,login,senha,perfil,matricula,cargo,pode_assinar,trocar_senha,criado_em) VALUES (?,?,?,?,?,?,?,1,?)",
+                  (x.get("nome", login), login, hash_senha(x["senha"]), x.get("perfil") if x.get("perfil") in PERFIS else "atendente",
+                   x.get("matricula") or "", x.get("cargo") or "", 1 if x.get("pode_assinar") else 0, agora()))
+        print(f"  Usuário criado: {login}")
     c.commit()
     c.close()
 
