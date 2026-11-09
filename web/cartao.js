@@ -98,7 +98,7 @@
 
     const tpl = document.getElementById(b.tipo === 'idoso' ? 't-idoso' : 't-pcd').content.cloneNode(true);
     const valores = {
-      registro: String(b.registro), nome: b.nome, validade: br(b.validade), emissao: br(b.data_emissao),
+      registro: Number(b.registro).toLocaleString('pt-BR'), nome: b.nome, validade: br(b.validade), emissao: br(b.data_emissao),
       orgao: cfg.orgao_expedidor || 'SSM', municipio: cfg.municipio || 'BAGÉ', uf: cfg.uf || 'RS',
     };
     tpl.querySelectorAll('[data-f]').forEach(el => {
@@ -106,7 +106,7 @@
       if (f === 'qr') el.innerHTML = QRSvg(b.link_qr, 'M', 1);
       else if (f in valores) el.textContent = valores[f];
     });
-    tpl.querySelectorAll('[data-f="nome"]').forEach(el => { el.style.whiteSpace = 'nowrap'; el.style.overflow = 'hidden'; });
+    tpl.querySelectorAll('[data-f="nome"]').forEach(el => { el.style.whiteSpace = 'nowrap'; el.style.overflow = 'hidden'; if (el.closest('.nome-frente')) el.style.display = 'block'; });
     const cards = tpl.querySelectorAll('.card');
     frente = cards[0]; verso = [...cards].find(c => c.classList.contains('back'));
 

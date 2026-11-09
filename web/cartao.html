@@ -45,6 +45,9 @@
   .fit { transform-origin: 0 0; }
   .val { font-weight: normal; font-size: 9pt; }
   .center { text-align: center; }
+  /* nome do beneficiário na frente: maior e centralizado sobre a linha (diminui sozinho se for muito longo) */
+  .nome-frente { text-align: center; font-weight: bold; letter-spacing: .1mm; }
+  .nome-frente span { display: block; width: 100%; }
 
   /* ===== VERSO ===== */
   .back .benef { left: 8mm; top: 7.2mm; width: 132mm; font-size: 9.6pt; font-weight: bold; display: flex; align-items: flex-end; white-space: nowrap; }
@@ -139,7 +142,7 @@
   <div class="t fit b" data-w="32.4" style="left:59.8mm; top:45.7mm; font-size:11.4pt;">Nº DO REGISTRO</div>
   <div class="t" style="left:94mm; top:45.9mm; font-size:10.5pt;"><span data-f="registro"></span></div>
   <div style="left:25.5mm; top:56mm; width:112.5mm; border-top:0.3mm solid #333;"></div>
-  <div class="t" style="left:33mm; top:51.2mm; font-size:10.5pt; font-weight:bold;"><span data-f="nome" style="width:100mm"></span></div>
+  <div class="t nome-frente" style="left:25.5mm; width:112.5mm; top:50.4mm; font-size:14pt;"><span data-f="nome"></span></div>
   <div class="t fit b" data-w="22.1" style="left:36.7mm; top:61.7mm; font-size:11.6pt;">VALIDADE:</div>
   <div class="t" style="left:60.5mm; top:61.8mm; font-size:10.5pt;"><span data-f="validade"></span></div>
   <div class="t fit b" data-w="53.9" style="left:24mm; top:70mm; font-size:11.6pt;">UNIDADE DA FEDERAÇÃO:</div>
@@ -195,7 +198,7 @@
   <div class="t fit b" data-w="28.8" style="left:53.9mm; top:47.1mm; font-size:9.2pt;">N° DO REGISTRO:</div>
   <div class="t" style="left:83.3mm; top:47.1mm; font-size:9.6pt; font-weight:bold;"><span data-f="registro"></span></div>
   <div style="left:22.8mm; top:56.4mm; width:112mm; border-top:0.25mm solid #333;"></div>
-  <div class="t" style="left:32.6mm; top:52.6mm; font-size:9.6pt; font-weight:bold; letter-spacing:.1mm;"><span data-f="nome" style="width:98mm"></span></div>
+  <div class="t nome-frente" style="left:22.8mm; width:112mm; top:50.8mm; font-size:14pt;"><span data-f="nome"></span></div>
   <div class="t fit b" data-w="33" style="left:30mm; top:62.6mm; font-size:9.4pt;">DATA DE EMISSÃO:</div>
   <div class="t" style="left:65.3mm; top:62mm; font-size:10.5pt; font-family:'Times New Roman', serif; font-style:italic; font-weight:bold;"><span data-f="emissao"></span></div>
   <div class="t fit b" data-w="45" style="left:30mm; top:70.1mm; font-size:9.4pt;">UNIDADE DA FEDERAÇÃO:</div>

@@ -203,8 +203,8 @@ def iniciar_banco():
     """)
     padrao = {
         "endereco_base": ENDERECO_PUBLICO or f"http://{ip_local()}:{PORTA}",
-        "proximo_registro_idoso": "1",
-        "proximo_registro_pcd": "1",
+        "proximo_registro_idoso": "12132",
+        "proximo_registro_pcd": "1302",
         "validade_anos_idoso": "5",
         "validade_anos_pcd": "5",
         "orgao_expedidor": "SSM",
@@ -213,6 +213,13 @@ def iniciar_banco():
     }
     for k, v in padrao.items():
         c.execute("INSERT OR IGNORE INTO config(chave, valor) VALUES (?,?)", (k, v))
+    # Numeração inicial definida por variável de ambiente (só avança, nunca volta)
+    for t in TIPOS:
+        minimo = os.environ.get(f"REGISTRO_INICIAL_{t.upper()}", "").replace(".", "").strip()
+        if minimo.isdigit():
+            r = c.execute("SELECT valor FROM config WHERE chave=?", (f"proximo_registro_{t}",)).fetchone()
+            if not r or not str(r[0]).isdigit() or int(r[0]) < int(minimo):
+                c.execute("UPDATE config SET valor=? WHERE chave=?", (minimo, f"proximo_registro_{t}"))
     # Se o primeiro início foi sem rede (ex.: logo após ligar o PC), corrige o endereço do QR
     atual = c.execute("SELECT valor FROM config WHERE chave='endereco_base'").fetchone()["valor"]
     ip = ip_local()
@@ -260,6 +267,14 @@ def novo_token(c):
         t = secrets.token_urlsafe(16)
         if not c.execute("SELECT 1 FROM beneficiarios WHERE token=?", (t,)).fetchone():
             return t
+
+
+def fmt_reg(n):
+    """Nº de registro com ponto de milhar: 12132 -> 12.132"""
+    try:
+        return f"{int(n):,}".replace(",", ".")
+    except (TypeError, ValueError):
+        return str(n)
 
 
 def so_digitos(s):
@@ -603,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
         dup = c.execute("SELECT id, registro FROM beneficiarios WHERE cpf=? AND tipo=? AND status!='cassado' AND id!=?",
                         (d["cpf"], d["tipo"], bid or 0)).fetchone()
         if dup:
-            raise Erro(400, f"Já existe cartão deste tipo para este CPF (registro nº {dup['registro']}). Use renovação ou 2ª via.")
+            raise Erro(400, f"Já existe cartão deste tipo para este CPF (registro nº {fmt_reg(dup['registro'])}). Use renovação ou 2ª via.")
         d["laudo_temporario"] = 1 if d.get("laudo_temporario") in (1, True, "1", "true", "on") else 0
         return d
 
@@ -629,6 +644,8 @@ class Handler(BaseHTTPRequestHandler):
             if m == "GET":
                 self.exigir(c)
                 q = (qs.get("q") or [""])[0].strip()
+                if re.fullmatch(r"\d{1,3}(\.\d{3})+", q):   # "12.132" -> "12132"
+                    q = q.replace(".", "")
                 sql, args = "SELECT * FROM beneficiarios WHERE 1=1", []
                 if q:
                     dig = so_digitos(q)
@@ -663,7 +680,7 @@ class Handler(BaseHTTPRequestHandler):
                     cur = c.execute(f"INSERT INTO beneficiarios({','.join(cols)}) VALUES ({','.join('?'*len(cols))})", vals)
                     bid = cur.lastrowid
                     c.execute("UPDATE config SET valor=? WHERE chave=?", (str(reg + 1), chave))
-                    registrar(c, bid, u["id"], "Cadastro e emissão do cartão", f"Registro nº {reg} – validade {validade:%d/%m/%Y}")
+                    registrar(c, bid, u["id"], "Cadastro e emissão do cartão", f"Registro nº {fmt_reg(reg)} – validade {validade:%d/%m/%Y}")
                     self.salvar_laudo(c, bid, u["id"], d)
                     c.commit()
                 return self.enviar(200, {"ok": True, "id": bid, "registro": reg})
@@ -781,7 +798,7 @@ class Handler(BaseHTTPRequestHandler):
         corpo = ""
         if b:
             tipo = "IDOSO (60+) – Res. 303/08" if b["tipo"] == "idoso" else "PESSOA COM DEFICIÊNCIA – Res. 304/08"
-            linhas = [("Beneficiário", b["nome"]), ("Tipo", tipo), ("Nº do registro", str(b["registro"])),
+            linhas = [("Beneficiário", b["nome"]), ("Tipo", tipo), ("Nº do registro", fmt_reg(b["registro"])),
                       ("Emissão", dt.date.fromisoformat(b["data_emissao"]).strftime("%d/%m/%Y")),
                       ("Validade", dt.date.fromisoformat(b["validade"]).strftime("%d/%m/%Y")),
                       ("Via", f"{b['via']}ª via"), ("Órgão expedidor", cfg(c, "orgao_expedidor") + " – " + cfg(c, "municipio") + "/" + cfg(c, "uf"))]

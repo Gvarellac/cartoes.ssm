@@ -15,6 +15,7 @@
   const badge = s => `<span class="badge s-${esc(s)}">${SIT[s] || esc(s)}</span>`;
   const tipoB = t => `<span class="badge t-${t}">${t === 'idoso' ? 'Idoso 60+' : 'PcD'}</span>`;
   const pode = (...p) => EU && p.includes(EU.perfil);
+  const reg = n => (n === null || n === undefined || n === '') ? '' : Number(n).toLocaleString('pt-BR');
 
   function toast(msg, erro) {
     const t = $('#toast'); t.textContent = msg; t.className = 'on' + (erro ? ' err' : '');
@@ -112,7 +113,7 @@
   function tabelaConsultas(lista, comNome = true) {
     if (!lista.length) return '<div class="vazio">Nenhuma consulta registrada ainda.</div>';
     return `<div class="tabela"><table><thead><tr><th>Data/hora</th>${comNome ? '<th>Beneficiário</th><th>Registro</th>' : ''}<th>Resultado</th><th>Agente</th><th>Origem</th></tr></thead><tbody>
-      ${lista.map(c => `<tr><td>${brh(c.data)}</td>${comNome ? `<td>${esc(c.nome || '— QR não reconhecido —')}</td><td>${esc(c.registro || '')}</td>` : ''}
+      ${lista.map(c => `<tr><td>${brh(c.data)}</td>${comNome ? `<td>${esc(c.nome || '— QR não reconhecido —')}</td><td>${esc(reg(c.registro))}</td>` : ''}
       <td>${badge(c.resultado)}</td><td>${esc(c.agente || 'não identificado')}</td><td>${esc(c.origem || '')} ${esc(c.ip || '')}</td></tr>`).join('')}
       </tbody></table></div>`;
   }
@@ -134,7 +135,7 @@
       const l = await api('GET', `beneficiarios?q=${q}&tipo=${$('#ft').value}&situacao=${$('#fs').value}`);
       $('#res').innerHTML = !l.length ? '<div class="painel vazio">Nenhum beneficiário encontrado.</div>' :
         `<div class="tabela"><table><thead><tr><th>Registro</th><th>Nome</th><th>CPF</th><th>Tipo</th><th>Validade</th><th>Situação</th></tr></thead><tbody>
-        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${b.registro}</b></td><td>${esc(b.nome)}</td><td>${esc(b.cpf)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td></tr>`).join('')}
+        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${reg(b.registro)}</b></td><td>${esc(b.nome)}</td><td>${esc(b.cpf)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td></tr>`).join('')}
         </tbody></table></div><p class="sub" style="margin-top:8px">${l.length} resultado(s)</p>`;
       $$('#res tr.link').forEach(tr => tr.addEventListener('click', () => location.hash = '#/b/' + tr.dataset.id));
     };
@@ -151,7 +152,7 @@
     const v = k => esc(b[k] ?? '');
     main.innerHTML = `
       <h1>${id ? 'Editar cadastro' : 'Novo cadastro'}</h1>
-      <p class="sub">${id ? `Registro nº ${b.registro} · ${esc(b.nome)}` : 'O nº de registro, a data de emissão e o QR Code são gerados automaticamente ao salvar.'}</p>
+      <p class="sub">${id ? `Registro nº ${reg(b.registro)} · ${esc(b.nome)}` : 'O nº de registro, a data de emissão e o QR Code são gerados automaticamente ao salvar.'}</p>
       <form id="fb" autocomplete="off">
         <div class="painel"><h2>Tipo de cartão</h2>
           <div class="tipos">
@@ -235,7 +236,7 @@
       const btn = f.querySelector('[type=submit]'); btn.disabled = true;
       try {
         if (id) { await api('PUT', 'beneficiarios/' + id, dados); toast('Cadastro atualizado.'); location.hash = '#/b/' + id; }
-        else { const r = await api('POST', 'beneficiarios', dados); toast(`Cartão nº ${r.registro} gerado.`); location.hash = '#/b/' + r.id; }
+        else { const r = await api('POST', 'beneficiarios', dados); toast(`Cartão nº ${reg(r.registro)} gerado.`); location.hash = '#/b/' + r.id; }
       } catch (err) { $('#erro-form').textContent = err.message; btn.disabled = false; }
     });
   }
@@ -251,7 +252,7 @@
     main.innerHTML = `
       <div class="cab">
         <div><h1>${esc(b.nome)}</h1>
-        <p class="sub">${tipoB(b.tipo)} &nbsp; Registro nº <b>${b.registro}</b> · ${b.via}ª via · ${badge(b.situacao)}</p></div>
+        <p class="sub">${tipoB(b.tipo)} &nbsp; Registro nº <b>${reg(b.registro)}</b> · ${b.via}ª via · ${badge(b.situacao)}</p></div>
         ${b.link_qr ? `<div class="qrprev">${QRSvg(b.link_qr, 'M', 2)}<small>${esc(b.link_qr)}</small></div>` : ''}
       </div>
       ${avisos.join('')}
@@ -332,7 +333,7 @@
       const l = await api('GET', `beneficiarios?q=${encodeURIComponent(q)}&tipo=${$('#ftp').value}`);
       $('#fres').innerHTML = !l.length ? '<div class="aviso r">Nenhum cartão encontrado com esse registro/nome. Possível cartão falso.</div>' :
         `<div class="tabela"><table><thead><tr><th>Registro</th><th>Nome</th><th>Tipo</th><th>Validade</th><th>Situação</th></tr></thead><tbody>
-        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${b.registro}</b></td><td>${esc(b.nome)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td></tr>`).join('')}</tbody></table></div>`;
+        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${reg(b.registro)}</b></td><td>${esc(b.nome)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td></tr>`).join('')}</tbody></table></div>`;
       $$('#fres tr.link').forEach(tr => tr.addEventListener('click', () => location.hash = '#/b/' + tr.dataset.id));
     };
     $('#fb').addEventListener('click', buscar);
@@ -391,8 +392,8 @@
         <div class="grade"><label class="c8">Endereço base<input name="endereco_base" value="${v('endereco_base')}"></label>
         <div class="c4" style="align-self:end"><small>Endereço aberto agora: <b>${esc(location.origin)}</b></small></div></div></div>
       <div class="painel"><h2>Numeração e validade</h2><div class="grade">
-        <label class="c3">Próximo nº de registro – Idoso<input name="proximo_registro_idoso" type="number" min="1" value="${v('proximo_registro_idoso')}"><small>Para continuar a numeração atual (ex.: 11611)</small></label>
-        <label class="c3">Próximo nº de registro – PcD<input name="proximo_registro_pcd" type="number" min="1" value="${v('proximo_registro_pcd')}"></label>
+        <label class="c3">Próximo nº de registro – Idoso<input name="proximo_registro_idoso" type="number" min="1" value="${v('proximo_registro_idoso')}"><small>Número que o próximo cartão de idoso vai receber</small></label>
+        <label class="c3">Próximo nº de registro – PcD<input name="proximo_registro_pcd" type="number" min="1" value="${v('proximo_registro_pcd')}"><small>Número que o próximo cartão de PcD vai receber</small></label>
         <label class="c3">Validade padrão – Idoso (anos)<input name="validade_anos_idoso" type="number" min="1" value="${v('validade_anos_idoso')}"></label>
         <label class="c3">Validade padrão – PcD (anos)<input name="validade_anos_pcd" type="number" min="1" value="${v('validade_anos_pcd')}"></label>
       </div></div>
