@@ -19,6 +19,7 @@ WEB = os.path.join(BASE, "web")
 DADOS = os.environ.get("DADOS_DIR") or os.path.join(BASE, "dados")
 LAUDOS = os.path.join(DADOS, "laudos")
 BACKUPS = os.path.join(DADOS, "backups")
+ASSINATURAS = os.path.join(DADOS, "assinaturas")
 DB = os.path.join(DADOS, "cadastro.db")
 _args = [a for a in sys.argv[1:] if not a.startswith("--")]
 PORTA = int(_args[0]) if _args else int(os.environ.get("PORT") or os.environ.get("PORTA") or "8080")
@@ -170,6 +171,7 @@ def _ciclo_backup():
 def iniciar_banco():
     os.makedirs(LAUDOS, exist_ok=True)
     os.makedirs(BACKUPS, exist_ok=True)
+    os.makedirs(ASSINATURAS, exist_ok=True)
     backup_diario()
     c = conectar()
     c.executescript("""
@@ -201,6 +203,14 @@ def iniciar_banco():
         usuario_id INTEGER, resultado TEXT, origem TEXT);
     CREATE TABLE IF NOT EXISTS config(chave TEXT PRIMARY KEY, valor TEXT);
     """)
+    # colunas novas (assinatura eletrônica e servidor responsável) – bancos antigos são atualizados
+    for tabela, col, tipo in (("usuarios", "cargo", "TEXT"), ("usuarios", "pode_assinar", "INTEGER DEFAULT 0"),
+                              ("usuarios", "assinatura_arquivo", "TEXT"),
+                              ("beneficiarios", "emitido_por", "INTEGER"), ("beneficiarios", "assinado_por", "INTEGER"),
+                              ("beneficiarios", "assinado_em", "TEXT"), ("beneficiarios", "assinatura_hash", "TEXT")):
+        if col not in [r[1] for r in c.execute(f"PRAGMA table_info({tabela})")]:
+            c.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")
+    c.execute("UPDATE beneficiarios SET emitido_por=criado_por WHERE emitido_por IS NULL")
     padrao = {
         "endereco_base": ENDERECO_PUBLICO or f"http://{ip_local()}:{PORTA}",
         "proximo_registro_idoso": "12132",
@@ -210,6 +220,8 @@ def iniciar_banco():
         "orgao_expedidor": "SSM",
         "municipio": "BAGÉ",
         "uf": "RS",
+        "exigir_assinatura": "1",
+        "chave_assinatura": secrets.token_hex(32),   # segredo dos códigos de verificação (nunca sai do servidor)
     }
     for k, v in padrao.items():
         c.execute("INSERT OR IGNORE INTO config(chave, valor) VALUES (?,?)", (k, v))
@@ -303,12 +315,50 @@ def registrar(c, bid, uid, acao, detalhe=""):
               (bid, agora(), uid, acao, detalhe))
 
 
+# ------------------------------------------------------------------ assinatura eletrônica
+def conteudo_cartao(b):
+    """Dados impressos no cartão que a assinatura protege."""
+    return "|".join(str(b[k]) for k in ("tipo", "nome", "registro", "data_emissao", "validade", "via", "token"))
+
+
+def codigo_assinatura(c, b, uid, quando):
+    chave = bytes.fromhex(cfg(c, "chave_assinatura"))
+    return hmac.new(chave, f"{conteudo_cartao(b)}|{uid}|{quando}".encode(), hashlib.sha256).hexdigest()
+
+
+def assinatura_info(c, b):
+    if not b["assinado_por"]:
+        return {"assinado": False, "valida": False}
+    u = c.execute("SELECT nome, cargo, assinatura_arquivo FROM usuarios WHERE id=?", (b["assinado_por"],)).fetchone()
+    h = b["assinatura_hash"] or ""
+    valida = bool(h) and hmac.compare_digest(codigo_assinatura(c, b, b["assinado_por"], b["assinado_em"]), h)
+    return {"assinado": True, "valida": valida, "nome": u["nome"] if u else "—", "cargo": (u["cargo"] if u else "") or "",
+            "em": b["assinado_em"], "codigo": f"{h[:4]}-{h[4:8]}".upper(),
+            "imagem": f"/api/assinatura/{b['assinado_por']}" if u and u["assinatura_arquivo"] else ""}
+
+
+def assinatura_ok(c, b):
+    return assinatura_info(c, b)["valida"]
+
+
+def limpar_assinatura(c, bid):
+    c.execute("UPDATE beneficiarios SET assinado_por=NULL, assinado_em=NULL, assinatura_hash=NULL WHERE id=?", (bid,))
+
+
+def assinar_cartao(c, b, u):
+    quando = agora()
+    h = codigo_assinatura(c, b, u["id"], quando)
+    c.execute("UPDATE beneficiarios SET assinado_por=?, assinado_em=?, assinatura_hash=? WHERE id=?", (u["id"], quando, h, b["id"]))
+    registrar(c, b["id"], u["id"], "Cartão assinado eletronicamente",
+              f"{u['nome']}{' – ' + u['cargo'] if u['cargo'] else ''} · código {h[:4].upper()}-{h[4:8].upper()}")
+
+
 def benef_dict(b, completo=True):
     d = dict(b)
     d["situacao"] = situacao(b)
     if not completo:
         d = {k: d[k] for k in ("id", "tipo", "nome", "cpf", "registro", "data_emissao", "validade",
-                               "status", "situacao", "via", "bairro", "telefone")}
+                               "status", "situacao", "via", "bairro", "telefone", "assinado_por")}
     return d
 
 
@@ -382,6 +432,20 @@ class Handler(BaseHTTPRequestHandler):
             raise Erro(401, "Faça login para continuar.")
         if perfis and u["perfil"] not in perfis:
             raise Erro(403, "Seu perfil não tem permissão para esta ação.")
+        return u
+
+    def exigir_assinante(self, c, senha):
+        """Quem assina precisa ter permissão e confirmar a própria senha."""
+        u = self.exigir(c)
+        if not u["pode_assinar"]:
+            raise Erro(403, "Seu usuário não tem permissão para assinar cartões.")
+        ip = self.ip_cliente()
+        if login_bloqueado(ip, u["login"]):
+            raise Erro(429, "Muitas tentativas erradas. Aguarde 15 minutos e tente de novo.")
+        if not confere_senha(senha or "", u["senha"]):
+            login_falhou(ip, u["login"])
+            raise Erro(400, "Senha incorreta. A assinatura não foi feita.")
+        login_ok(ip, u["login"])
         return u
 
     # ---- roteamento
@@ -468,7 +532,8 @@ class Handler(BaseHTTPRequestHandler):
         if r == "me":
             u = self.exigir(c)
             return self.enviar(200, {"id": u["id"], "nome": u["nome"], "login": u["login"], "perfil": u["perfil"],
-                                     "trocar_senha": bool(u["trocar_senha"])})
+                                     "trocar_senha": bool(u["trocar_senha"]), "pode_assinar": bool(u["pode_assinar"]),
+                                     "cargo": u["cargo"] or "", "assinatura": bool(u["assinatura_arquivo"])})
 
         if r == "minha-senha" and m == "POST":
             u = self.exigir(c)
@@ -487,7 +552,8 @@ class Handler(BaseHTTPRequestHandler):
         if r == "painel":
             self.exigir(c)
             linhas = c.execute("SELECT * FROM beneficiarios").fetchall()
-            cont = {"total": len(linhas), "idoso": 0, "pcd": 0, "ativo": 0, "vencido": 0, "suspenso": 0, "cassado": 0, "vencendo": 0}
+            cont = {"total": len(linhas), "idoso": 0, "pcd": 0, "ativo": 0, "vencido": 0, "suspenso": 0, "cassado": 0, "vencendo": 0,
+                    "a_assinar": 0}
             lim = (hoje() + dt.timedelta(days=30)).isoformat()
             for b in linhas:
                 cont[b["tipo"]] += 1
@@ -495,6 +561,8 @@ class Handler(BaseHTTPRequestHandler):
                 cont[s] += 1
                 if s == "ativo" and b["validade"] <= lim:
                     cont["vencendo"] += 1
+                if b["status"] == "ativo" and not b["assinado_por"]:
+                    cont["a_assinar"] += 1
             cont["consultas_hoje"] = c.execute("SELECT COUNT(*) FROM consultas WHERE data>=?", (hoje().isoformat(),)).fetchone()[0]
             cont["invalidas_hoje"] = c.execute("SELECT COUNT(*) FROM consultas WHERE data>=? AND resultado!='ativo'", (hoje().isoformat(),)).fetchone()[0]
             return self.enviar(200, cont)
@@ -502,10 +570,12 @@ class Handler(BaseHTTPRequestHandler):
         if r == "config":
             if m == "GET":
                 self.exigir(c)
-                return self.enviar(200, {x["chave"]: x["valor"] for x in c.execute("SELECT * FROM config")})
+                return self.enviar(200, {x["chave"]: x["valor"] for x in c.execute("SELECT * FROM config WHERE chave NOT LIKE 'chave_%'")})
             self.exigir(c, "admin")
             d = self.corpo_json()
             for k, v in d.items():
+                if k.startswith("chave_"):
+                    continue
                 if c.execute("SELECT 1 FROM config WHERE chave=?", (k,)).fetchone():
                     if k.startswith("proximo_registro") or k.startswith("validade_anos"):
                         if not str(v).isdigit() or int(v) < 1:
@@ -517,8 +587,9 @@ class Handler(BaseHTTPRequestHandler):
         if r == "usuarios":
             self.exigir(c, "admin")
             if m == "GET":
-                return self.enviar(200, [dict(x, senha=None) for x in c.execute(
-                    "SELECT id,nome,login,perfil,matricula,ativo,criado_em, '' senha FROM usuarios ORDER BY nome")])
+                return self.enviar(200, [dict(x) for x in c.execute(
+                    "SELECT id,nome,login,perfil,matricula,cargo,pode_assinar,ativo,criado_em,"
+                    " (assinatura_arquivo IS NOT NULL) tem_assinatura FROM usuarios ORDER BY nome")])
             d = self.corpo_json()
             if m == "POST":
                 login = (d.get("login") or "").strip().lower()
@@ -529,8 +600,9 @@ class Handler(BaseHTTPRequestHandler):
                 if len(d.get("senha") or "") < SENHA_MIN:
                     raise Erro(400, f"Senha inicial com pelo menos {SENHA_MIN} caracteres.")
                 try:
-                    c.execute("INSERT INTO usuarios(nome,login,senha,perfil,matricula,trocar_senha,criado_em) VALUES (?,?,?,?,?,1,?)",
-                              (d["nome"].strip(), login, hash_senha(d["senha"]), d["perfil"], d.get("matricula"), agora()))
+                    c.execute("INSERT INTO usuarios(nome,login,senha,perfil,matricula,cargo,pode_assinar,trocar_senha,criado_em) VALUES (?,?,?,?,?,?,?,1,?)",
+                              (d["nome"].strip(), login, hash_senha(d["senha"]), d["perfil"], (d.get("matricula") or "").strip(),
+                               (d.get("cargo") or "").strip(), 1 if d.get("pode_assinar") in (1, True, "1", "on") else 0, agora()))
                 except sqlite3.IntegrityError:
                     raise Erro(400, "Já existe um usuário com esse login.")
                 c.commit()
@@ -543,6 +615,28 @@ class Handler(BaseHTTPRequestHandler):
                         c.execute("DELETE FROM sessoes WHERE usuario_id=?", (uid,))
                 if d.get("perfil") in PERFIS:
                     c.execute("UPDATE usuarios SET perfil=? WHERE id=?", (d["perfil"], uid))
+                for campo in ("nome", "matricula", "cargo"):
+                    if campo in d:
+                        v = (d[campo] or "").strip()
+                        if campo == "nome" and not v:
+                            raise Erro(400, "Informe o nome.")
+                        c.execute(f"UPDATE usuarios SET {campo}=? WHERE id=?", (v, uid))
+                if "pode_assinar" in d:
+                    c.execute("UPDATE usuarios SET pode_assinar=? WHERE id=?", (1 if d["pode_assinar"] in (1, True, "1", "on") else 0, uid))
+                if d.get("remover_assinatura"):
+                    c.execute("UPDATE usuarios SET assinatura_arquivo=NULL WHERE id=?", (uid,))
+                arq = d.get("assinatura_imagem")
+                if arq and arq.get("dados"):
+                    ext = os.path.splitext(arq.get("nome") or "")[1].lower()
+                    if ext not in (".png", ".jpg", ".jpeg"):
+                        raise Erro(400, "A imagem da assinatura deve ser PNG ou JPG.")
+                    bruto = base64.b64decode(arq["dados"].split(",")[-1])
+                    if len(bruto) > 3 * 1024 * 1024:
+                        raise Erro(413, "Imagem da assinatura muito grande (máx. 3 MB).")
+                    fn = f"{uid}_{agora_dt():%Y%m%d%H%M%S}{ext}"
+                    with open(os.path.join(ASSINATURAS, fn), "wb") as f:
+                        f.write(bruto)
+                    c.execute("UPDATE usuarios SET assinatura_arquivo=? WHERE id=?", (fn, uid))
                 if d.get("senha"):
                     if len(d["senha"]) < SENHA_MIN:
                         raise Erro(400, f"Senha com pelo menos {SENHA_MIN} caracteres.")
@@ -552,6 +646,27 @@ class Handler(BaseHTTPRequestHandler):
                     raise Erro(400, "O sistema precisa de pelo menos um administrador ativo.")
                 c.commit()
                 return self.enviar(200, {"ok": True})
+
+        if r == "assinatura" and m == "GET" and len(p) > 1:
+            self.exigir(c)
+            u = c.execute("SELECT assinatura_arquivo FROM usuarios WHERE id=?", (int(p[1]),)).fetchone()
+            if not u or not u["assinatura_arquivo"]:
+                raise Erro(404, "Sem imagem de assinatura.")
+            caminho = os.path.join(ASSINATURAS, u["assinatura_arquivo"])
+            with open(caminho, "rb") as f:
+                return self.enviar(200, f.read(), TIPOS_ARQ.get(os.path.splitext(caminho)[1].lower(), "application/octet-stream"))
+
+        if r == "assinar" and m == "POST":
+            d = self.corpo_json()
+            u = self.exigir_assinante(c, d.get("senha"))
+            n = 0
+            for bid in d.get("ids") or []:
+                b = c.execute("SELECT * FROM beneficiarios WHERE id=?", (int(bid),)).fetchone()
+                if b and b["status"] == "ativo" and not assinatura_ok(c, b):
+                    assinar_cartao(c, b, u)
+                    n += 1
+            c.commit()
+            return self.enviar(200, {"ok": True, "assinados": n})
 
         if r == "consultas":
             self.exigir(c, "admin", "atendente", "fiscal")
@@ -654,6 +769,8 @@ class Handler(BaseHTTPRequestHandler):
                 if (qs.get("tipo") or [""])[0] in TIPOS:
                     sql += " AND tipo=?"; args.append(qs["tipo"][0])
                 rows = [benef_dict(b, False) for b in c.execute(sql + " ORDER BY id DESC LIMIT 1000", args)]
+                if (qs.get("pendentes") or [""])[0] == "1":
+                    rows = [x for x in rows if x["status"] == "ativo" and not x["assinado_por"]]
                 sit = (qs.get("situacao") or [""])[0]
                 if sit:
                     rows = [x for x in rows if x["situacao"] == sit]
@@ -674,9 +791,9 @@ class Handler(BaseHTTPRequestHandler):
                             raise Erro(400, "Data de validade inválida.")
                     else:
                         validade = somar_anos(emissao, int(cfg(c, f"validade_anos_{d['tipo']}")))
-                    cols = CAMPOS_BENEF + ["registro", "data_emissao", "validade", "status", "token", "via", "criado_por", "criado_em", "atualizado_em"]
+                    cols = CAMPOS_BENEF + ["registro", "data_emissao", "validade", "status", "token", "via", "criado_por", "criado_em", "atualizado_em", "emitido_por"]
                     vals = [d.get(k) for k in CAMPOS_BENEF] + [reg, emissao.isoformat(), validade.isoformat(), "ativo",
-                                                                novo_token(c), 1, u["id"], agora(), agora()]
+                                                                novo_token(c), 1, u["id"], agora(), agora(), u["id"]]
                     cur = c.execute(f"INSERT INTO beneficiarios({','.join(cols)}) VALUES ({','.join('?'*len(cols))})", vals)
                     bid = cur.lastrowid
                     c.execute("UPDATE config SET valor=? WHERE chave=?", (str(reg + 1), chave))
@@ -695,6 +812,10 @@ class Handler(BaseHTTPRequestHandler):
             u = self.exigir(c)
             d = benef_dict(b)
             d["link_qr"] = f"{cfg(c, 'endereco_base')}/v/{b['token']}"
+            d["assinatura"] = assinatura_info(c, b)
+            d["exigir_assinatura"] = cfg(c, "exigir_assinatura") != "0"
+            e = c.execute("SELECT nome, matricula FROM usuarios WHERE id=?", (b["emitido_por"],)).fetchone()
+            d["servidor_responsavel"] = {"nome": e["nome"], "matricula": e["matricula"] or ""} if e else None
             d["historico"] = [dict(x) for x in c.execute(
                 "SELECT h.data, h.acao, h.detalhe, u.nome usuario FROM historico h LEFT JOIN usuarios u ON u.id=h.usuario_id WHERE beneficiario_id=? ORDER BY h.id DESC", (bid,))]
             d["consultas"] = [dict(x) for x in c.execute(
@@ -704,7 +825,7 @@ class Handler(BaseHTTPRequestHandler):
                           (bid, b["token"], agora(), self.ip_cliente(), u["id"], d["situacao"], "Sistema"))
                 c.commit()
                 d = {k: d[k] for k in ("id", "tipo", "nome", "registro", "data_emissao", "validade", "situacao", "status",
-                                       "motivo_status", "via", "consultas")}
+                                       "motivo_status", "via", "consultas", "assinatura")}
             return self.enviar(200, d)
 
         if m == "GET" and acao == "laudo":
@@ -726,6 +847,10 @@ class Handler(BaseHTTPRequestHandler):
                       [d.get(k) for k in CAMPOS_BENEF if k != "tipo"] + [agora(), bid])
             mud = [k for k in CAMPOS_BENEF if k != "tipo" and str(b[k] or "") != str(d.get(k) or "")]
             registrar(c, bid, u["id"], "Dados atualizados", ", ".join(mud) if mud else "sem alterações")
+            b2 = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
+            if b2["assinado_por"] and not assinatura_ok(c, b2):
+                limpar_assinatura(c, bid)
+                registrar(c, bid, u["id"], "Assinatura cancelada", "Dados impressos no cartão foram alterados. É preciso assinar de novo.")
             self.salvar_laudo(c, bid, u["id"], d)
             c.commit()
             return self.enviar(200, {"ok": True})
@@ -758,18 +883,31 @@ class Handler(BaseHTTPRequestHandler):
                     validade = dt.date.fromisoformat(d["validade"])
                 else:
                     validade = somar_anos(emissao, int(cfg(c, f"validade_anos_{b['tipo']}")))
-                c.execute("UPDATE beneficiarios SET data_emissao=?, validade=?, token=?, via=via+1, status='ativo', motivo_status=NULL, atualizado_em=? WHERE id=?",
-                          (emissao.isoformat(), validade.isoformat(), tok, agora(), bid))
+                c.execute("UPDATE beneficiarios SET data_emissao=?, validade=?, token=?, via=via+1, status='ativo', motivo_status=NULL, atualizado_em=?,"
+                          " emitido_por=?, assinado_por=NULL, assinado_em=NULL, assinatura_hash=NULL WHERE id=?",
+                          (emissao.isoformat(), validade.isoformat(), tok, agora(), u["id"], bid))
                 registrar(c, bid, u["id"], "Cartão renovado", f"Nova validade {validade:%d/%m/%Y} – {b['via']+1}ª via. QR anterior invalidado.")
             else:
                 motivo = (d.get("motivo") or "").strip() or "não informado"
-                c.execute("UPDATE beneficiarios SET token=?, via=via+1, atualizado_em=? WHERE id=?", (tok, agora(), bid))
+                c.execute("UPDATE beneficiarios SET token=?, via=via+1, atualizado_em=?, emitido_por=?,"
+                          " assinado_por=NULL, assinado_em=NULL, assinatura_hash=NULL WHERE id=?", (tok, agora(), u["id"], bid))
                 registrar(c, bid, u["id"], f"Emitida {b['via']+1}ª via", f"Motivo: {motivo}. QR anterior invalidado.")
             c.commit()
             return self.enviar(200, {"ok": True})
 
+        if m == "POST" and acao == "assinar":
+            u = self.exigir_assinante(c, self.corpo_json().get("senha"))
+            if b["status"] != "ativo":
+                raise Erro(400, "Só é possível assinar cartão ativo (não suspenso nem cassado).")
+            if not assinatura_ok(c, b):
+                assinar_cartao(c, b, u)
+                c.commit()
+            return self.enviar(200, {"ok": True})
+
         if m == "POST" and acao == "impressao":
             u = self.exigir(c, "admin", "atendente")
+            if cfg(c, "exigir_assinatura") != "0" and not assinatura_ok(c, b):
+                raise Erro(400, "O cartão precisa ser assinado antes de imprimir.")
             registrar(c, bid, u["id"], "Cartão impresso", f"{b['via']}ª via")
             c.commit()
             return self.enviar(200, {"ok": True})
@@ -802,6 +940,15 @@ class Handler(BaseHTTPRequestHandler):
                       ("Emissão", dt.date.fromisoformat(b["data_emissao"]).strftime("%d/%m/%Y")),
                       ("Validade", dt.date.fromisoformat(b["validade"]).strftime("%d/%m/%Y")),
                       ("Via", f"{b['via']}ª via"), ("Órgão expedidor", cfg(c, "orgao_expedidor") + " – " + cfg(c, "municipio") + "/" + cfg(c, "uf"))]
+            ai = assinatura_info(c, b)
+            if ai["valida"]:
+                quando = dt.datetime.strptime(ai["em"], "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y")
+                linhas.append(("Assinado eletronicamente por", f"{ai['nome']}{' – ' + ai['cargo'] if ai['cargo'] else ''}, em {quando}"))
+                linhas.append(("Código de verificação", ai["codigo"]))
+            elif ai["assinado"]:
+                linhas.append(("Assinatura eletrônica", "NÃO CONFERE – dados alterados após a assinatura"))
+            else:
+                linhas.append(("Assinatura eletrônica", "aguardando assinatura"))
             if sit in ("suspenso", "cassado") and b["motivo_status"]:
                 linhas.append(("Motivo", b["motivo_status"]))
             corpo = "".join(f"<div class='l'><span>{e(k)}</span><b>{e(v)}</b></div>" for k, v in linhas)

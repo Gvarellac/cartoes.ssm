@@ -22,6 +22,8 @@
     clearTimeout(t._t); t._t = setTimeout(() => t.className = '', 3500);
   }
 
+  const lerArquivo = arq => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(arq); });
+
   async function api(metodo, caminho, corpo) {
     const r = await fetch('/api/' + caminho, {
       method: metodo, headers: corpo ? { 'Content-Type': 'application/json' } : {},
@@ -68,6 +70,7 @@
       ['painel', 'Painel', ['admin', 'atendente', 'fiscal']],
       ['novo', 'Novo cadastro', ['admin', 'atendente']],
       ['lista', 'Beneficiários', ['admin', 'atendente', 'fiscal']],
+      ['assinaturas', 'Assinaturas', EU.pode_assinar ? ['admin', 'atendente', 'fiscal'] : []],
       ['fiscalizacao', 'Fiscalização', ['admin', 'atendente', 'fiscal']],
       ['usuarios', 'Usuários', ['admin']],
       ['config', 'Configurações', ['admin']],
@@ -83,7 +86,7 @@
     const [, r = 'painel', id] = location.hash.split('/');
     if (EU.trocar_senha && r !== 'senha') { location.hash = '#/senha'; return; }
     $$('#nav a').forEach(a => a.classList.toggle('ativo', a.dataset.r === r || (r === 'b' && a.dataset.r === 'lista') || (r === 'editar' && a.dataset.r === 'lista')));
-    const telas = { painel, novo: () => formulario(), editar: () => formulario(id), lista, b: () => detalhe(id), fiscalizacao, usuarios, config, senha };
+    const telas = { painel, novo: () => formulario(), editar: () => formulario(id), lista, b: () => detalhe(id), assinaturas, fiscalizacao, usuarios, config, senha };
     (telas[r] || painel)();
     window.scrollTo(0, 0);
   }
@@ -103,6 +106,7 @@
         <div class="num r"><b>${p.vencido}</b><span>Vencidos</span></div>
         <div class="num l"><b>${p.suspenso}</b><span>Suspensos</span></div>
         <div class="num r"><b>${p.cassado}</b><span>Cassados</span></div>
+        <div class="num l" ${EU.pode_assinar ? 'style="cursor:pointer" onclick="location.hash=\'#/assinaturas\'"' : ''}><b>${p.a_assinar}</b><span>Aguardando assinatura</span></div>
         <div class="num"><b>${p.consultas_hoje}</b><span>Consultas de QR hoje</span></div>
         <div class="num r"><b>${p.invalidas_hoje}</b><span>Consultas irregulares hoje</span></div>
       </div>
@@ -249,6 +253,10 @@
     const avisos = [];
     if (b.situacao === 'vencido') avisos.push('<div class="aviso r">Cartão <b>vencido</b>. Para continuar usando a vaga, o beneficiário precisa renovar.</div>');
     if (b.situacao === 'suspenso' || b.situacao === 'cassado') avisos.push(`<div class="aviso r">Cartão <b>${b.situacao}</b>. Motivo: ${esc(b.motivo_status || '—')}</div>`);
+    const A = b.assinatura || {};
+    const precisaAssinar = b.status === 'ativo' && !A.valida;
+    if (precisaAssinar && b.exigir_assinatura !== false && gestor) avisos.push(`<div class="aviso">Cartão <b>aguardando assinatura eletrônica</b> do Secretário. Só pode ser impresso depois de assinado.${A.assinado ? ' (A assinatura anterior foi cancelada porque os dados do cartão mudaram.)' : ''}</div>`);
+    const podeImprimir = !precisaAssinar || b.exigir_assinatura === false;
     main.innerHTML = `
       <div class="cab">
         <div><h1>${esc(b.nome)}</h1>
@@ -257,7 +265,8 @@
       </div>
       ${avisos.join('')}
       <div class="acoes">
-        ${gestor && b.situacao !== 'suspenso' && b.situacao !== 'cassado' ? `<a class="btn primario" href="/cartao.html?id=${b.id}" target="_blank">Imprimir cartão</a>` : ''}
+        ${EU.pode_assinar && precisaAssinar ? '<button class="btn primario" data-a="assinar">Assinar cartão</button>' : ''}
+        ${gestor && podeImprimir && b.situacao !== 'suspenso' && b.situacao !== 'cassado' ? `<a class="btn primario" href="/cartao.html?id=${b.id}" target="_blank">Imprimir cartão</a>` : ''}
         ${gestor ? `<a class="btn" href="#/editar/${b.id}">Editar dados</a>` : ''}
         ${gestor && b.status !== 'cassado' ? '<button class="btn" data-a="renovar">Renovar</button><button class="btn" data-a="segunda-via">Emitir 2ª via</button>' : ''}
         ${gestor && b.status === 'ativo' ? '<button class="btn alerta" data-a="suspenso">Suspender</button>' : ''}
@@ -268,6 +277,8 @@
       <div class="painel"><h2>Cartão</h2><div class="dados">
         ${linha('Data de emissão', br(b.data_emissao))}${linha('Validade', br(b.validade))}${linha('Via', b.via + 'ª')}
         ${linha('Órgão expedidor', CFG.orgao_expedidor)}
+        ${linha('Assinatura eletrônica', A.valida ? `${A.nome}${A.cargo ? ' – ' + A.cargo : ''}, em ${brh(A.em)} · código ${A.codigo}` : 'aguardando assinatura')}
+        ${b.servidor_responsavel ? linha('Servidor responsável', b.servidor_responsavel.nome + (b.servidor_responsavel.matricula ? ' – matrícula ' + b.servidor_responsavel.matricula : '')) : ''}
       </div></div>
       ${b.cpf !== undefined ? `
       <div class="painel"><h2>Dados pessoais</h2><div class="dados">
@@ -291,9 +302,17 @@
     $$('[data-a]').forEach(btn => btn.addEventListener('click', async () => {
       const a = btn.dataset.a;
       let dados;
+      if (a === 'assinar') {
+        dados = await dialogo('Assinar cartão', `<p>Você vai assinar eletronicamente o cartão nº <b>${reg(b.registro)}</b> de <b>${esc(b.nome)}</b>
+          como <b>${esc(EU.nome)}${EU.cargo ? ' – ' + esc(EU.cargo) : ''}</b>.</p><label>Confirme com a sua senha</label><input type="password" name="senha" autocomplete="current-password">`, 'Assinar');
+        if (!dados) return;
+        try { await api('POST', `beneficiarios/${id}/assinar`, dados); toast('Cartão assinado.'); detalhe(id); } catch (e) { toast(e.message, true); }
+        return;
+      }
       if (a === 'renovar') {
         dados = await dialogo('Renovar cartão', `<p>Gera nova data de emissão e nova validade. <b>O QR do cartão atual deixa de valer</b> – entregue o novo cartão impresso.</p>
-          <label>Nova validade <small>(em branco = ${esc(b.tipo === 'idoso' ? CFG.validade_anos_idoso : CFG.validade_anos_pcd)} anos a partir de hoje)</small></label><input type="date" name="validade">`, 'Renovar');
+          <label>Nova validade <small>(em branco = ${esc(b.tipo === 'idoso' ? CFG.validade_anos_idoso : CFG.validade_anos_pcd)} anos a partir de hoje)</small></label><input type="date" name="validade">
+          <p><small>O novo cartão precisará ser assinado de novo pelo Secretário.</small></p>`, 'Renovar');
         if (dados && !dados.validade) delete dados.validade;
       } else if (a === 'segunda-via') {
         dados = await dialogo('Emitir 2ª via', `<p>Use em caso de perda, roubo ou dano. <b>O QR da via anterior deixa de valer</b> e aparecerá como "não reconhecido" na fiscalização.</p>
@@ -314,6 +333,34 @@
         if (a === 'renovar' || a === 'segunda-via') setTimeout(() => window.open('/cartao.html?id=' + id, '_blank'), 300);
       } catch (e) { toast(e.message, true); }
     }));
+  }
+
+  // ---------- ASSINATURAS (Secretários)
+  async function assinaturas() {
+    if (!EU.pode_assinar) { main.innerHTML = '<div class="aviso r">Seu usuário não tem permissão para assinar cartões.</div>'; return; }
+    const l = await api('GET', 'beneficiarios?pendentes=1');
+    main.innerHTML = `
+      <h1>Assinaturas</h1>
+      <p class="sub">Cartões emitidos que aguardam a sua assinatura eletrônica. Você assina como <b>${esc(EU.nome)}${EU.cargo ? ' – ' + esc(EU.cargo) : ''}</b>.
+      ${EU.assinatura ? '' : '<br>Você ainda não tem imagem de assinatura: no cartão sairá o seu nome em letra cursiva (o administrador pode enviar a imagem em Usuários).'}</p>
+      ${!l.length ? '<div class="painel vazio">Nenhum cartão aguardando assinatura.</div>' : `
+      <div class="acoes"><button class="btn primario" id="assinar-sel">Assinar selecionados</button>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="todos" style="width:auto" checked> marcar todos</label></div>
+      <div class="tabela"><table><thead><tr><th></th><th>Registro</th><th>Nome</th><th>Tipo</th><th>Emissão</th><th>Validade</th><th>Via</th></tr></thead><tbody>
+      ${l.map(b => `<tr><td><input type="checkbox" class="sel" value="${b.id}" checked style="width:auto"></td><td><b>${reg(b.registro)}</b></td>
+        <td><a href="#/b/${b.id}">${esc(b.nome)}</a></td><td>${tipoB(b.tipo)}</td><td>${br(b.data_emissao)}</td><td>${br(b.validade)}</td><td>${b.via}ª</td></tr>`).join('')}
+      </tbody></table></div>`}`;
+    if (!l.length) return;
+    $('#todos').addEventListener('change', e => $$('.sel').forEach(x => x.checked = e.target.checked));
+    $('#assinar-sel').addEventListener('click', async () => {
+      const ids = $$('.sel').filter(x => x.checked).map(x => +x.value);
+      if (!ids.length) return toast('Marque pelo menos um cartão.', true);
+      const d = await dialogo('Assinar cartões', `<p>Você vai assinar eletronicamente <b>${ids.length} cartão(ões)</b>.</p>
+        <label>Confirme com a sua senha</label><input type="password" name="senha" autocomplete="current-password">`, 'Assinar');
+      if (!d) return;
+      try { const r = await api('POST', 'assinar', { ids, senha: d.senha }); toast(`${r.assinados} cartão(ões) assinado(s).`); assinaturas(); }
+      catch (e) { toast(e.message, true); }
+    });
   }
 
   // ---------- FISCALIZAÇÃO
@@ -355,24 +402,45 @@
       <div class="painel"><h2>Novo usuário</h2><form id="fu" class="grade">
         <label class="c4 req">Nome<input name="nome" required></label>
         <label class="c2">Matrícula<input name="matricula"></label>
+        <label class="c4">Cargo <small>(sai junto da assinatura)</small><input name="cargo" placeholder="ex.: Secretário Municipal de Segurança e Mobilidade Urbana"></label>
+        <label class="c4" style="flex-direction:row;align-items:center;gap:8px;margin-top:18px"><input type="checkbox" name="pode_assinar" value="1" style="width:auto"> Pode assinar cartões (Secretário)</label>
         <label class="c2 req">Login<input name="login" required placeholder="ex.: joao.silva"></label>
         <label class="c2 req">Perfil<select name="perfil">${Object.entries(P).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
         <label class="c2 req">Senha inicial<input name="senha" required minlength="8"></label>
         <div class="c12"><div class="erro" id="erro-u"></div><button class="btn primario">Criar usuário</button> <small style="color:#667085">No primeiro acesso a pessoa troca a senha.</small></div>
       </form></div>
-      <div class="tabela"><table><thead><tr><th>Nome</th><th>Login</th><th>Matrícula</th><th>Perfil</th><th>Situação</th><th></th></tr></thead><tbody>
-      ${l.map(u => `<tr><td>${esc(u.nome)}</td><td>${esc(u.login)}</td><td>${esc(u.matricula)}</td>
+      <div class="tabela"><table><thead><tr><th>Nome</th><th>Login</th><th>Matrícula</th><th>Perfil</th><th>Assina?</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${l.map(u => `<tr><td>${esc(u.nome)}${u.cargo ? `<br><small style="color:#667085">${esc(u.cargo)}</small>` : ''}</td><td>${esc(u.login)}</td><td>${esc(u.matricula)}</td>
         <td><select data-perfil="${u.id}" style="width:auto">${Object.entries(P).map(([k, v]) => `<option value="${k}" ${u.perfil === k ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
+        <td>${u.pode_assinar ? `<span class="badge s-ativo">Sim</span>${u.tem_assinatura ? '' : '<br><small style="color:#667085">sem imagem</small>'}` : '—'}</td>
         <td>${u.ativo ? '<span class="badge s-ativo">Ativo</span>' : '<span class="badge s-invalido">Inativo</span>'}</td>
-        <td style="white-space:nowrap"><button class="btn" data-senha="${u.id}">Redefinir senha</button> <button class="btn ${u.ativo ? 'perigo' : ''}" data-ativo="${u.id}" data-v="${u.ativo ? 0 : 1}">${u.ativo ? 'Desativar' : 'Ativar'}</button></td></tr>`).join('')}
+        <td style="white-space:nowrap"><button class="btn" data-dados="${u.id}">Dados e assinatura</button> <button class="btn" data-senha="${u.id}">Redefinir senha</button> <button class="btn ${u.ativo ? 'perigo' : ''}" data-ativo="${u.id}" data-v="${u.ativo ? 0 : 1}">${u.ativo ? 'Desativar' : 'Ativar'}</button></td></tr>`).join('')}
       </tbody></table></div>`;
     $('#fu').addEventListener('submit', async e => {
-      e.preventDefault(); const d = Object.fromEntries(new FormData(e.target));
+      e.preventDefault(); const d = Object.fromEntries(new FormData(e.target)); d.pode_assinar = !!d.pode_assinar;
       try { await api('POST', 'usuarios', d); toast('Usuário criado.'); usuarios(); } catch (err) { $('#erro-u').textContent = err.message; }
     });
     const put = async (id, d) => { try { await api('PUT', 'usuarios/' + id, d); toast('Atualizado.'); } catch (e) { toast(e.message, true); } usuarios(); };
     $$('[data-perfil]').forEach(s => s.addEventListener('change', () => put(s.dataset.perfil, { perfil: s.value })));
     $$('[data-ativo]').forEach(b => b.addEventListener('click', () => put(b.dataset.ativo, { ativo: b.dataset.v === '1' })));
+    $$('[data-dados]').forEach(b => b.addEventListener('click', async () => {
+      const u = l.find(x => x.id == b.dataset.dados);
+      const d = await dialogo('Dados e assinatura – ' + u.nome, `
+        <label>Nome</label><input name="nome" value="${esc(u.nome)}">
+        <label>Matrícula <small>(sai no rodapé dos cartões que esta pessoa emitir)</small></label><input name="matricula" value="${esc(u.matricula)}">
+        <label>Cargo <small>(sai junto da assinatura)</small></label><input name="cargo" value="${esc(u.cargo)}">
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="pode_assinar" value="1" style="width:auto" ${u.pode_assinar ? 'checked' : ''}> Pode assinar cartões (Secretário)</label>
+        <label>Imagem da assinatura <small>(PNG com fundo transparente ou JPG com fundo branco)</small></label>
+        ${u.tem_assinatura ? `<div style="border:1px solid #e4e7ec;border-radius:6px;padding:6px;text-align:center;margin-bottom:6px"><img src="/api/assinatura/${u.id}?t=${Date.now()}" style="max-height:70px;max-width:100%"></div>
+          <label style="display:flex;gap:8px;align-items:center;font-weight:normal"><input type="checkbox" name="remover" value="1" style="width:auto"> remover a imagem atual</label>` : '<p><small>Sem imagem: no cartão sai o nome em letra cursiva.</small></p>'}
+        <input type="file" name="arquivo" accept=".png,.jpg,.jpeg">`, 'Salvar');
+      if (!d) return;
+      const corpo = { nome: d.nome, matricula: d.matricula, cargo: d.cargo,
+        pode_assinar: !!$('#dlg-corpo [name=pode_assinar]').checked, remover_assinatura: !!($('#dlg-corpo [name=remover]') || {}).checked };
+      const f = $('#dlg-corpo [name=arquivo]').files[0];
+      if (f) { if (f.size > 3 * 1024 * 1024) return toast('Imagem muito grande (máx. 3 MB).', true); corpo.assinatura_imagem = { nome: f.name, dados: await lerArquivo(f) }; }
+      put(u.id, corpo);
+    }));
     $$('[data-senha]').forEach(b => b.addEventListener('click', async () => {
       const d = await dialogo('Redefinir senha', '<label>Nova senha (mín. 8 caracteres)</label><input name="senha" minlength="8">', 'Salvar');
       if (d && d.senha) put(b.dataset.senha, { senha: d.senha });
@@ -396,6 +464,12 @@
         <label class="c3">Próximo nº de registro – PcD<input name="proximo_registro_pcd" type="number" min="1" value="${v('proximo_registro_pcd')}"><small>Número que o próximo cartão de PcD vai receber</small></label>
         <label class="c3">Validade padrão – Idoso (anos)<input name="validade_anos_idoso" type="number" min="1" value="${v('validade_anos_idoso')}"></label>
         <label class="c3">Validade padrão – PcD (anos)<input name="validade_anos_pcd" type="number" min="1" value="${v('validade_anos_pcd')}"></label>
+      </div></div>
+      <div class="painel"><h2>Assinatura eletrônica</h2><div class="grade">
+        <label class="c6">Exigir assinatura do Secretário antes de imprimir<select name="exigir_assinatura">
+          <option value="1" ${CFG.exigir_assinatura !== '0' ? 'selected' : ''}>Sim – o cartão só imprime depois de assinado</option>
+          <option value="0" ${CFG.exigir_assinatura === '0' ? 'selected' : ''}>Não – pode imprimir sem assinatura</option></select></label>
+        <div class="c6" style="align-self:end"><small>Quem pode assinar é definido em <a href="#/usuarios">Usuários</a> (marque "Pode assinar cartões").</small></div>
       </div></div>
       <div class="painel"><h2>Dados impressos no cartão</h2><div class="grade">
         <label class="c4">Órgão expedidor<input name="orgao_expedidor" value="${v('orgao_expedidor')}"></label>

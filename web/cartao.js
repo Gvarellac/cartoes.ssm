@@ -7,6 +7,7 @@
   const area = document.getElementById('area');
   let frente = null, verso = null;
 
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const br = iso => { if (!iso) return ''; const [a, m, d] = iso.split('-'); return `${d}/${m}/${a}`; };
 
   // Formatos de impressão
@@ -43,6 +44,17 @@
     Object.assign(leg.style, { left: (dir - lado - 4) + 'mm', width: (lado + 8) + 'mm', fontSize: fonte + 'pt',
                                 top: (baixo - lado - fonte * 0.3528 * 1.6) + 'mm' });
     rules.style.width = (dir - lado - 4 - 8) + 'mm';   // coluna de texto à esquerda do quadro
+    // assinatura eletrônica dentro do quadro (tamanhos em medida real impressa)
+    box.style.padding = (1 / escala) + 'mm';
+    const txt = card.querySelector('.ass-txt'), area = card.querySelector('.ass-area'), cur = card.querySelector('.ass-cursiva');
+    if (txt) txt.style.fontSize = (5 / escala) + 'pt';
+    if (cur) {
+      let fs = 18 / escala; cur.style.fontSize = fs + 'pt';
+      while (cur.scrollWidth > area.clientWidth && fs > 5 / escala) { fs -= 0.5 / escala; cur.style.fontSize = fs + 'pt'; }
+    }
+    // rodapé discreto: servidor responsável
+    const rod = card.querySelector('.rodape-servidor');
+    if (rod) Object.assign(rod.style, { left: '8mm', top: (baixo + 0.35) + 'mm', width: (dir - 8) + 'mm', fontSize: (5.5 / escala) + 'pt' });
     let size = 10; rules.style.fontSize = size + 'pt';
     while (rules.scrollHeight > rules.clientHeight + 1 && size > 5) { size -= 0.1; rules.style.fontSize = size.toFixed(1) + 'pt'; }
   }
@@ -93,6 +105,11 @@
       area.innerHTML = `<div class="msg"><b>Cartão ${b.situacao.toUpperCase()}.</b><br>Não é permitido imprimir um cartão nesta situação.</div>`;
       document.getElementById('imprimir').disabled = true; return;
     }
+    const A = b.assinatura || {};
+    if (b.exigir_assinatura !== false && !A.valida) {
+      area.innerHTML = `<div class="msg"><b>Cartão aguardando assinatura eletrônica.</b><br>O Secretário precisa assinar este cartão (menu <b>Assinaturas</b>) antes da impressão.</div>`;
+      document.getElementById('imprimir').disabled = true; return;
+    }
     document.title = `Cartão nº ${b.registro} – ${b.nome}`;
     document.getElementById('titulo').textContent = `${b.tipo === 'idoso' ? 'Idoso' : 'PcD'} · Nº ${b.registro} · ${b.nome} · ${b.via}ª via`;
 
@@ -104,6 +121,12 @@
     tpl.querySelectorAll('[data-f]').forEach(el => {
       const f = el.dataset.f;
       if (f === 'qr') el.innerHTML = QRSvg(b.link_qr, 'M', 1);
+      else if (f === 'ass-img') el.innerHTML = !A.valida ? '' : A.imagem ? `<img src="${A.imagem}" alt="">` : `<span class="ass-cursiva">${esc(A.nome)}</span>`;
+      else if (f === 'ass-txt') el.innerHTML = !A.valida ? '' :
+        `Assinado eletronicamente por<br><b>${esc(A.nome)}</b>${A.cargo ? '<br>' + esc(A.cargo) : ''}<br>em ${br(String(A.em).slice(0, 10))} · Cód. ${esc(A.codigo)}`;
+      else if (f === 'ass-leg') el.textContent = A.valida ? 'ASSINATURA ELETRÔNICA' : 'CARIMBO E ASSINATURA';
+      else if (f === 'servidor') el.textContent = b.servidor_responsavel ?
+        `Servidor responsável: ${b.servidor_responsavel.nome}${b.servidor_responsavel.matricula ? ' – Matrícula ' + b.servidor_responsavel.matricula : ''}` : '';
       else if (f in valores) el.textContent = valores[f];
     });
     tpl.querySelectorAll('[data-f="nome"]').forEach(el => { el.style.whiteSpace = 'nowrap'; el.style.overflow = 'hidden'; if (el.closest('.nome-frente')) el.style.display = 'block'; });
