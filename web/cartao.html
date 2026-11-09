@@ -50,12 +50,15 @@
   .nome-frente span { display: block; width: 100%; }
 
   /* ===== VERSO ===== */
-  .back .benef { left: 8mm; top: 7.2mm; width: 132mm; font-size: 9.6pt; font-weight: bold; display: flex; align-items: flex-end; white-space: nowrap; }
-  .back .benef .linha { flex: 1; border-bottom: 0.3mm solid #222; margin-left: 1.5mm; min-height: 4.4mm; padding-left: 1.5mm; font-weight: bold; }
+  .back .benef { left: 8mm; top: 4.6mm; width: 132mm; font-size: 9.6pt; font-weight: bold; display: flex; align-items: flex-end; white-space: nowrap; }
+  .back .benef .linha { flex: 1; border-bottom: 0.3mm solid #222; margin-left: 1.5mm; min-height: 5.6mm; padding-left: 1.5mm; font-weight: bold; font-size: 13pt; line-height: 1.15; overflow: hidden; }
+  .back .benef .linha { display: flex; align-items: flex-end; }
+  .back .benef .linha [data-f] { display: block; width: 100%; line-height: 1.1; padding-bottom: .3mm; }
+  .back .benef.reg { top: 11.4mm; width: 78mm; }
   .back .benef .linha [contenteditable] { width: 97%; }
-  .back .titulo { left: 3mm; width: 142mm; top: 13.6mm; text-align: center; font-weight: bold; font-size: 10.5pt; letter-spacing: .5mm; }
+  .back .titulo { left: 3mm; width: 142mm; top: 18.6mm; text-align: center; font-weight: bold; font-size: 10.5pt; letter-spacing: .5mm; }
   .back .titulo::after { content: ""; display: block; width: 26mm; margin: 1.1mm auto 0; border-top: 0.3mm solid #222; }
-  .back .rules { left: 8mm; top: 20.6mm; width: 132mm; height: 78.4mm; font-size: 8.2pt; line-height: 1.24; }
+  .back .rules { left: 8mm; top: 25mm; width: 132mm; height: 74mm; font-size: 8.2pt; line-height: 1.24; }
   .back .it { display: grid; grid-template-columns: 4.6mm 1fr; margin-top: .9mm; }
   .back .it.sub { margin-left: 4.6mm; grid-template-columns: 6.2mm 1fr; margin-top: .25mm; }
   .back .it .n { font-weight: bold; }
@@ -156,6 +159,7 @@
 <div class="card corte back pcd-back">
   <div style="left:3mm; top:3mm; width:142mm; height:99mm; border:0.3mm solid #555;"></div>
   <div class="benef">NOME DO BENEFICIÁRIO:<span class="linha"><span data-f="nome"></span></span></div>
+  <div class="benef reg">Nº DO REGISTRO:<span class="linha"><span data-f="registro"></span></span></div>
   <div class="titulo">REGRAS DE UTILIZAÇÃO</div>
   <div class="rules">
     <div class="it"><span class="n">1.</span><span class="tx">A autorização concedida por meio deste cartão somente terá validade se o mesmo for apresentado no original e preencher as seguintes condições:</span></div>
@@ -215,6 +219,7 @@
 <div class="card corte back idoso-back">
   <div style="left:3mm; top:3mm; width:142mm; height:99mm; border:0.3mm solid #555;"></div>
   <div class="benef">NOME DO BENEFICIÁRIO:<span class="linha"><span data-f="nome"></span></span></div>
+  <div class="benef reg">Nº DO REGISTRO:<span class="linha"><span data-f="registro"></span></span></div>
   <div class="titulo">REGRAS DE UTILIZAÇÃO</div>
   <div class="rules">
     <div class="it"><span class="n">1.</span><span class="tx">A autorização concedida por meio deste cartão somente terá validade se o mesmo for apresentado no original e preencher as seguintes condições:</span></div>
