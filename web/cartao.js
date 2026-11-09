@@ -123,7 +123,7 @@
       if (f === 'qr') el.innerHTML = QRSvg(b.link_qr, 'M', 1);
       else if (f === 'ass-img') el.innerHTML = !A.valida ? '' : A.imagem ? `<img src="${A.imagem}" alt="">` : `<span class="ass-cursiva">${esc(A.nome)}</span>`;
       else if (f === 'ass-txt') el.innerHTML = !A.valida ? '' :
-        `Assinado eletronicamente por<br><b>${esc(A.nome)}</b>${A.cargo ? '<br>' + esc(A.cargo) : ''}<br>em ${br(String(A.em).slice(0, 10))} · Cód. ${esc(A.codigo)}`;
+        `Assinado eletronicamente por<br><b>${esc(A.nome)}</b>${A.cargo ? '<br>' + esc(A.cargo) : ''}<br>em ${br(String(A.em).slice(0, 10))} às ${String(A.em).slice(11, 16)}<br>Cód. de verificação: ${esc(A.codigo)}`;
       else if (f === 'ass-leg') el.textContent = A.valida ? 'ASSINATURA ELETRÔNICA' : 'CARIMBO E ASSINATURA';
       else if (f === 'servidor') el.textContent = b.servidor_responsavel ?
         `Servidor responsável: ${b.servidor_responsavel.nome}${b.servidor_responsavel.matricula ? ' – Matrícula ' + b.servidor_responsavel.matricula : ''}` : '';

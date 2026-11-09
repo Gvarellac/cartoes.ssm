@@ -956,7 +956,7 @@ class Handler(BaseHTTPRequestHandler):
                       ("Via", f"{b['via']}ª via"), ("Órgão expedidor", cfg(c, "orgao_expedidor") + " – " + cfg(c, "municipio") + "/" + cfg(c, "uf"))]
             ai = assinatura_info(c, b)
             if ai["valida"]:
-                quando = dt.datetime.strptime(ai["em"], "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y")
+                quando = dt.datetime.strptime(ai["em"], "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y às %H:%M")
                 linhas.append(("Assinado eletronicamente por", f"{ai['nome']}{' – ' + ai['cargo'] if ai['cargo'] else ''}, em {quando}"))
                 linhas.append(("Código de verificação", ai["codigo"]))
             elif ai["assinado"]:
