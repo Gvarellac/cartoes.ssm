@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartões de Estacionamento – SSM Bagé</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="aviso-inicial" style="max-width:640px;margin:80px auto;padding:24px;font:15px/1.5 Arial,sans-serif;background:#fff;border:1px solid #e4e7ec;border-radius:10px">
+  <b>Carregando o sistema…</b><br><br>
+  Se esta mensagem não sumir em alguns segundos, recarregue a página (tecla F5).<br>
+  Se continuar, confira a conexão com a internet ou avise o administrador do sistema.
+</div>
+
+<!-- LOGIN -->
+<section id="tela-login" class="login" hidden>
+  <form id="form-login" class="login-box">
+    <img src="/img/brasao-bage.png" alt="">
+    <h1>Cartões de Estacionamento</h1>
+    <p>Secretaria de Segurança e Mobilidade Urbana – SSM<br>Prefeitura Municipal de Bagé</p>
+    <label>Usuário<input name="login" autocomplete="username" required autofocus></label>
+    <label>Senha<input name="senha" type="password" autocomplete="current-password" required></label>
+    <div class="erro" id="erro-login"></div>
+    <button class="btn primario" type="submit">Entrar</button>
+  </form>
+</section>
+
+<!-- APLICAÇÃO -->
+<div id="app" class="app" hidden>
+  <aside class="menu">
+    <div class="marca">
+      <img src="/img/brasao-bage.png" alt="">
+      <div><b>Vaga Especial</b><span>SSM · Bagé/RS</span></div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="usuario">
+      <div id="usuario-nome"></div>
+      <a href="#/senha">Alterar senha</a> · <a href="#" id="sair">Sair</a>
+    </div>
+  </aside>
+  <main id="conteudo"></main>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlg-form">
+    <h3 id="dlg-titulo"></h3>
+    <div id="dlg-corpo"></div>
+    <div class="dlg-botoes">
+      <button value="cancelar" class="btn">Cancelar</button>
+      <button value="ok" class="btn primario" id="dlg-ok">Confirmar</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast"></div>
+
+<script src="/qr.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
