@@ -594,7 +594,8 @@ class Handler(BaseHTTPRequestHandler):
             u = self.exigir(c)
             return self.enviar(200, {"id": u["id"], "nome": u["nome"], "login": u["login"], "perfil": u["perfil"],
                                      "trocar_senha": bool(u["trocar_senha"]), "pode_assinar": bool(u["pode_assinar"]),
-                                     "cargo": u["cargo"] or "", "assinatura": bool(u["assinatura_arquivo"])})
+                                     "cargo": u["cargo"] or "", "assinatura": bool(u["assinatura_arquivo"]),
+                                     "matricula": u["matricula"] or ""})
 
         if r == "minha-senha" and m == "POST":
             u = self.exigir(c)

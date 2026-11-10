@@ -101,12 +101,14 @@
     document.getElementById('titulo').textContent = `${b.tipo === 'idoso' ? 'Pessoa idosa' : 'PcD'} · Nº ${reg} · ${b.nome} · ${b.via}ª via`;
 
     const S = b.servidor_responsavel;
-    const codServidor = S ? (S.matricula ? 'mat. ' + S.matricula : 'cód. ' + S.id) : '';
+    const codServidor = S ? (S.matricula ? 'mat. ' + S.matricula : 'cód. ' + S.id) : '—';
+    const codImpressor = eu.id ? (eu.matricula ? 'mat. ' + eu.matricula : 'cód. ' + eu.id) : '—';
+    const hojeBr = new Date().toLocaleDateString('pt-BR');
     const assTxt = A.valida
       ? `<div class="b" style="font-size:5.6pt">${esc(A.nome)}</div>` +
         (A.cargo ? `<div style="font-size:5pt">${esc(A.cargo)}</div>` : '') +
-        `<div style="font-size:4.4pt;color:#222">Assinado eletronicamente em ${br(A.em)} às ${String(A.em).slice(11, 16)}</div>` +
-        `<div style="font-size:4.4pt;color:#222">Cód. de verificação ${esc(A.codigo)}${codServidor ? ' · Servidor emissor: ' + esc(codServidor) : ''}</div>`
+        `<div class="nw" style="font-size:4.4pt;color:#222">Assinado eletronicamente em ${br(A.em)} às ${String(A.em).slice(11, 16)} · Cód. ${esc(A.codigo)}</div>` +
+        `<div class="nw" style="font-size:4.4pt;color:#222"><b>Emitido por:</b> ${esc(codServidor)} · <b>Impresso por:</b> ${esc(codImpressor)} em ${hojeBr}</div>`
       : `<div style="font-size:5pt;font-style:italic">Nome e cargo do emissor</div>` +
         (pendente ? '<div style="font-size:4.4pt;color:#b54708">aguardando assinatura eletrônica</div>' : '');
     const valores = {
@@ -118,7 +120,7 @@
       'ass-img': A.valida ? (A.imagem ? `<img src="${A.imagem}" alt="">` : `<span class="ass-cursiva">${esc(A.nome)}</span>`)
                           : (pendente ? '<span class="ass-pendente">AGUARDANDO ASSINATURA</span>' : ''),
       'ass-txt': assTxt,
-      servidor: S ? esc(`Servidor responsável: ${S.nome}${S.matricula ? ' – Matrícula ' + S.matricula : ''}`) : '',
+      servidor: '',   // identificação do servidor fica na frente, junto da assinatura (matrícula de quem emitiu e de quem imprimiu)
       qr: QRSvg(b.link_qr, 'M', 0).replace('<svg ', '<svg style="width:100%;height:100%;display:block" '),
     };
     const HTML = new Set(['validade', 'orgao', 'municipio', 'simbolo', 'marca', 'ass-img', 'ass-txt', 'servidor', 'qr']);
