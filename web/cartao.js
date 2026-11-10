@@ -97,7 +97,7 @@
 
   async function carregar() {
     if (!id) { area.innerHTML = '<div class="msg">Cartão não informado.</div>'; return; }
-    const [rb, rc] = await Promise.all([fetch('/api/beneficiarios/' + id), fetch('/api/config')]);
+    const [rb, rc, rm] = await Promise.all([fetch('/api/beneficiarios/' + id), fetch('/api/config'), fetch('/api/me')]);
     if (rb.status === 401) { location.href = '/'; return; }
     const b = await rb.json(), cfg = await rc.json();
     if (!rb.ok) { area.innerHTML = '<div class="msg">' + (b.erro || 'Erro ao carregar') + '</div>'; return; }
@@ -106,10 +106,14 @@
       document.getElementById('imprimir').disabled = true; return;
     }
     const A = b.assinatura || {};
-    if (b.exigir_assinatura !== false && !A.valida) {
-      area.innerHTML = `<div class="msg"><b>Cartão aguardando assinatura eletrônica.</b><br>O Secretário precisa assinar este cartão (menu <b>Assinaturas</b>) antes da impressão.</div>`;
-      document.getElementById('imprimir').disabled = true; return;
-    }
+    const eu = rm.ok ? await rm.json() : {};
+    const pendente = b.exigir_assinatura !== false && !A.valida;
+    document.body.classList.toggle('bloqueado', pendente);
+    document.getElementById('imprimir').disabled = pendente;
+    document.getElementById('aviso-ass').innerHTML = !pendente ? '' : `<div class="aviso-assinatura"><b>Cartão aguardando assinatura eletrônica.</b>
+      ${eu.pode_assinar ? 'Confira o cartão abaixo e clique em <b>Assinar</b> (no alto). Depois da assinatura, o botão Imprimir é liberado.'
+                        : 'A impressão é liberada depois que o Secretário assinar (menu Assinaturas).'}</div>`;
+    document.getElementById('assinar-box').hidden = !(pendente && eu.pode_assinar);
     document.title = `Cartão nº ${b.registro} – ${b.nome}`;
     document.getElementById('titulo').textContent = `${b.tipo === 'idoso' ? 'Idoso' : 'PcD'} · Nº ${b.registro} · ${b.nome} · ${b.via}ª via`;
 
@@ -121,7 +125,7 @@
     tpl.querySelectorAll('[data-f]').forEach(el => {
       const f = el.dataset.f;
       if (f === 'qr') el.innerHTML = QRSvg(b.link_qr, 'M', 1);
-      else if (f === 'ass-img') el.innerHTML = !A.valida ? '' : A.imagem ? `<img src="${A.imagem}" alt="">` : `<span class="ass-cursiva">${esc(A.nome)}</span>`;
+      else if (f === 'ass-img') el.innerHTML = !A.valida ? (pendente ? '<div class="ass-pendente">AGUARDANDO<br>ASSINATURA</div>' : '') : A.imagem ? `<img src="${A.imagem}" alt="">` : `<span class="ass-cursiva">${esc(A.nome)}</span>`;
       else if (f === 'ass-txt') el.innerHTML = !A.valida ? '' :
         `Assinado eletronicamente por<br><b>${esc(A.nome)}</b>${A.cargo ? '<br>' + esc(A.cargo) : ''}<br>em ${br(String(A.em).slice(0, 10))} às ${String(A.em).slice(11, 16)}<br>Cód. de verificação: ${esc(A.codigo)}`;
       else if (f === 'ass-leg') el.textContent = A.valida ? 'ASSINATURA ELETRÔNICA' : 'CARIMBO E ASSINATURA';
@@ -143,6 +147,25 @@
   const atual = () => (document.querySelector('input[name=fmt]:checked') || {}).value || 'a4';
   document.querySelectorAll('input[name=fmt]').forEach(r => r.addEventListener('change', () => montar(atual())));
   document.getElementById('cores').addEventListener('change', e => document.body.classList.toggle('cores', e.target.checked));
+  // assinatura direto na tela do cartão (só aparece para quem pode assinar)
+  const $id = x => document.getElementById(x);
+  $id('assinar').addEventListener('click', () => { $id('assinar').hidden = true; $id('assinar-form').hidden = false; $id('assinar-msg').textContent = ''; $id('assinar-senha').focus(); });
+  $id('assinar-cancela').addEventListener('click', () => { $id('assinar-form').hidden = true; $id('assinar').hidden = false; $id('assinar-senha').value = ''; });
+  const confirmar = async () => {
+    const senha = $id('assinar-senha').value; if (!senha) return $id('assinar-senha').focus();
+    $id('assinar-ok').disabled = true;
+    try {
+      const r = await fetch(`/api/beneficiarios/${id}/assinar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.erro || 'Não foi possível assinar.');
+      $id('assinar-box').hidden = true; $id('assinar-senha').value = '';
+      await carregar();
+    } catch (e) { $id('assinar-msg').textContent = e.message; $id('assinar-senha').select(); }
+    finally { $id('assinar-ok').disabled = false; }
+  };
+  $id('assinar-ok').addEventListener('click', confirmar);
+  $id('assinar-senha').addEventListener('keydown', e => e.key === 'Enter' && confirmar());
+
   document.getElementById('imprimir').addEventListener('click', () => {
     fetch('/api/beneficiarios/' + id + '/impressao', { method: 'POST' });
     window.print();

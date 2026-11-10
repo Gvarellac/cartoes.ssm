@@ -138,10 +138,20 @@
       const q = encodeURIComponent($('#q').value.trim());
       const l = await api('GET', `beneficiarios?q=${q}&tipo=${$('#ft').value}&situacao=${$('#fs').value}`);
       $('#res').innerHTML = !l.length ? '<div class="painel vazio">Nenhum beneficiário encontrado.</div>' :
-        `<div class="tabela"><table><thead><tr><th>Registro</th><th>Nome</th><th>CPF</th><th>Tipo</th><th>Validade</th><th>Situação</th></tr></thead><tbody>
-        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${reg(b.registro)}</b></td><td>${esc(b.nome)}</td><td>${esc(b.cpf)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td></tr>`).join('')}
+        `<div class="tabela"><table><thead><tr><th>Registro</th><th>Nome</th><th>CPF</th><th>Tipo</th><th>Validade</th><th>Situação</th><th>Assinatura</th></tr></thead><tbody>
+        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${reg(b.registro)}</b></td><td>${esc(b.nome)}</td><td>${esc(b.cpf)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td>
+          <td style="white-space:nowrap">${b.status !== 'ativo' ? '—' : b.assinado_por ? '<span class="badge s-ativo">Assinado</span>' :
+            (EU.pode_assinar ? `<button class="btn primario" data-assinar="${b.id}" style="padding:4px 10px">Assinar</button>` : '<span class="badge s-suspenso">Pendente</span>')}</td></tr>`).join('')}
         </tbody></table></div><p class="sub" style="margin-top:8px">${l.length} resultado(s)</p>`;
       $$('#res tr.link').forEach(tr => tr.addEventListener('click', () => location.hash = '#/b/' + tr.dataset.id));
+      $$('#res [data-assinar]').forEach(bt => bt.addEventListener('click', async ev => {
+        ev.stopPropagation();
+        const b = l.find(x => x.id == bt.dataset.assinar);
+        const d = await dialogo('Assinar cartão', `<p>Você vai assinar eletronicamente o cartão nº <b>${reg(b.registro)}</b> de <b>${esc(b.nome)}</b>
+          como <b>${esc(EU.nome)}${EU.cargo ? ' – ' + esc(EU.cargo) : ''}</b>.</p><label>Confirme com a sua senha</label><input type="password" name="senha" autocomplete="current-password">`, 'Assinar');
+        if (!d) return;
+        try { await api('POST', `beneficiarios/${b.id}/assinar`, d); toast('Cartão assinado.'); buscar(); } catch (e) { toast(e.message, true); }
+      }));
     };
     $('#q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(buscar, 250); });
     $('#ft').addEventListener('change', buscar); $('#fs').addEventListener('change', buscar);

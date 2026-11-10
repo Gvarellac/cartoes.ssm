@@ -22,6 +22,14 @@
     font: 13px/1.4 Arial, sans-serif; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
   .toolbar button { background: #fff; color: #111; border: 0; border-radius: 4px; padding: 6px 14px; font-weight: bold; cursor: pointer; }
   .toolbar label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .toolbar button:disabled { opacity: .45; cursor: not-allowed; }
+  .toolbar button.assinar { background: #0b7a3b; color: #fff; }
+  .toolbar #assinar-senha { padding: 5px 8px; border-radius: 4px; border: 0; width: 170px; }
+  .toolbar #assinar-msg { font-weight: bold; color: #fecdca; }
+  .aviso-assinatura { max-width: 820px; margin: 14px auto 0; background: #fffaeb; border: 1px solid #fedf89; color: #7a2e0e;
+    border-radius: 8px; padding: 10px 14px; font: 14px/1.4 Arial, sans-serif; }
+  .ass-pendente { display: flex; align-items: center; justify-content: center; height: 100%; text-align: center; font-weight: bold; color: #b54708; }
+  @media print { body.bloqueado #area, body.bloqueado .aviso-assinatura { display: none !important; } }
   .label-card { font: bold 12px Arial, sans-serif; color: #444; margin: 22px auto 6px; width: 148mm; }
 
   .card { width: 148mm; height: 105mm; background: #fff; margin: 0 auto; position: relative; overflow: hidden;
@@ -111,6 +119,12 @@
   <label><input type="radio" name="fmt" value="a6"> Papel A6</label>
   <label><input type="checkbox" id="cores"> brasões coloridos</label>
   <button id="imprimir">Imprimir</button>
+  <span id="assinar-box" hidden>
+    <button id="assinar" class="assinar">Assinar</button>
+    <span id="assinar-form" hidden>Senha: <input type="password" id="assinar-senha" autocomplete="current-password">
+      <button id="assinar-ok" class="assinar">Confirmar assinatura</button> <button id="assinar-cancela">Cancelar</button></span>
+    <span id="assinar-msg"></span>
+  </span>
 </div>
 <!-- Símbolo Internacional de Acesso -->
 <svg width="0" height="0" style="position:absolute">
@@ -125,6 +139,7 @@
     </symbol>
   </defs>
 </svg>
+<div id="aviso-ass"></div>
 <div id="area"><div class="msg">Carregando…</div></div>
 
 <template id="t-pcd">
