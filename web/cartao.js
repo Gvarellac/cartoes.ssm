@@ -93,9 +93,10 @@
     document.body.classList.toggle('bloqueado', pendente);
     document.getElementById('imprimir').disabled = pendente;
     document.getElementById('aviso-ass').innerHTML = !pendente ? '' : `<div class="aviso-assinatura"><b>Credencial aguardando assinatura eletrônica.</b>
-      ${eu.pode_assinar ? 'Confira a credencial abaixo e clique em <b>Assinar</b> (no alto). Depois da assinatura, o botão Imprimir é liberado.'
+      ${b.modo_assinatura === 'chancela' ? 'Não há assinatura de Secretária definida para a chancela. Peça ao administrador para conferir em Configurações e em Usuários ("Pode assinar").'
+        : eu.pode_assinar ? 'Confira a credencial abaixo e clique em <b>Assinar</b> (no alto). Depois da assinatura, o botão Imprimir é liberado.'
                         : 'A impressão é liberada depois que o Secretário assinar (menu Assinaturas).'}</div>`;
-    document.getElementById('assinar-box').hidden = !(pendente && eu.pode_assinar);
+    document.getElementById('assinar-box').hidden = !(pendente && eu.pode_assinar && b.modo_assinatura !== 'chancela');
     const reg = b.registro_txt || String(b.registro);
     document.title = `Credencial nº ${reg} – ${b.nome}`;
     document.getElementById('titulo').textContent = `${b.tipo === 'idoso' ? 'Pessoa idosa' : 'PcD'} · Nº ${reg} · ${b.nome} · ${b.via}ª via`;
@@ -104,11 +105,14 @@
     const codServidor = S ? (S.matricula ? 'mat. ' + S.matricula : 'cód. ' + S.id) : '—';
     const codImpressor = eu.id ? (eu.matricula ? 'mat. ' + eu.matricula : 'cód. ' + eu.id) : '—';
     const hojeBr = new Date().toLocaleDateString('pt-BR');
+    const linhaAss = A.tipo === 'chancela'
+      ? `Assinatura por chancela eletrônica${A.ato ? ' – ' + esc(A.ato) : ''} · Cód. ${esc(A.codigo)}`
+      : `Assinado eletronicamente em ${br(A.em)} às ${String(A.em).slice(11, 16)} · Cód. ${esc(A.codigo)}`;
     const assTxt = A.valida
-      ? `<div class="b" style="font-size:5.6pt">${esc(A.nome)}</div>` +
-        (A.cargo ? `<div style="font-size:5pt">${esc(A.cargo)}</div>` : '') +
-        `<div class="nw" style="font-size:4.4pt;color:#222">Assinado eletronicamente em ${br(A.em)} às ${String(A.em).slice(11, 16)} · Cód. ${esc(A.codigo)}</div>` +
-        `<div class="nw" style="font-size:4.4pt;color:#222"><b>Emitido por:</b> ${esc(codServidor)} · <b>Impresso por:</b> ${esc(codImpressor)} em ${hojeBr}</div>`
+      ? `<div class="b nw" style="font-size:5.6pt">${esc(A.nome)}</div>` +
+        (A.cargo ? `<div class="nw" style="font-size:5pt">${esc(A.cargo)}</div>` : '') +
+        `<div class="nw" style="font-size:4.4pt;color:#222">${linhaAss}</div>` +
+        `<div class="nw" style="font-size:4.4pt;color:#222"><b>Emitido por:</b> ${esc(codServidor)} em ${br(b.data_emissao)} · <b>Impresso por:</b> ${esc(codImpressor)} em ${hojeBr}</div>`
       : `<div style="font-size:5pt;font-style:italic">Nome e cargo do emissor</div>` +
         (pendente ? '<div style="font-size:4.4pt;color:#b54708">aguardando assinatura eletrônica</div>' : '');
     const valores = {

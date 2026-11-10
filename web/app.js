@@ -72,7 +72,7 @@
       ['painel', 'Painel', ['admin', 'atendente', 'fiscal']],
       ['novo', 'Novo cadastro', ['admin', 'atendente']],
       ['lista', 'Beneficiários', ['admin', 'atendente', 'fiscal']],
-      ['assinaturas', 'Assinaturas', EU.pode_assinar ? ['admin', 'atendente', 'fiscal'] : []],
+      ['assinaturas', 'Assinaturas', EU.pode_assinar && CFG.modo_assinatura !== 'chancela' ? ['admin', 'atendente', 'fiscal'] : []],
       ['fiscalizacao', 'Fiscalização', ['admin', 'atendente', 'fiscal']],
       ['usuarios', 'Usuários', ['admin']],
       ['config', 'Configurações', ['admin']],
@@ -142,7 +142,7 @@
       $('#res').innerHTML = !l.length ? '<div class="painel vazio">Nenhum beneficiário encontrado.</div>' :
         `<div class="tabela"><table><thead><tr><th>Registro</th><th>Nome</th><th>CPF</th><th>Tipo</th><th>Validade</th><th>Situação</th><th>Assinatura</th></tr></thead><tbody>
         ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${regT(b)}</b></td><td>${esc(b.nome)}</td><td>${esc(b.cpf)}</td><td>${tipoB(b.tipo)}</td><td>${val(b.validade)}</td><td>${badge(b.situacao)}</td>
-          <td style="white-space:nowrap">${b.status !== 'ativo' ? '—' : b.assinado_por ? '<span class="badge s-ativo">Assinada</span>' :
+          <td style="white-space:nowrap">${b.status !== 'ativo' ? '—' : b.assinado_por ? `<span class="badge s-ativo">${CFG.modo_assinatura === 'chancela' ? 'Chancela' : 'Assinada'}</span>` :
             (EU.pode_assinar ? `<button class="btn primario" data-assinar="${b.id}" style="padding:4px 10px">Assinar</button>` : '<span class="badge s-suspenso">Pendente</span>')}</td></tr>`).join('')}
         </tbody></table></div><p class="sub" style="margin-top:8px">${l.length} resultado(s)</p>`;
       $$('#res tr.link').forEach(tr => tr.addEventListener('click', () => location.hash = '#/b/' + tr.dataset.id));
@@ -268,7 +268,7 @@
     if (b.situacao === 'vencido') avisos.push('<div class="aviso r">Cartão <b>vencido</b>. Para continuar usando a vaga, o beneficiário precisa renovar.</div>');
     if (b.situacao === 'suspenso' || b.situacao === 'cassado') avisos.push(`<div class="aviso r">Cartão <b>${b.situacao}</b>. Motivo: ${esc(b.motivo_status || '—')}</div>`);
     const A = b.assinatura || {};
-    const precisaAssinar = b.status === 'ativo' && !A.valida;
+    const precisaAssinar = b.status === 'ativo' && !A.valida && !(CFG.modo_assinatura === 'chancela');
     if (precisaAssinar && b.exigir_assinatura !== false && gestor) avisos.push(`<div class="aviso">Cartão <b>aguardando assinatura eletrônica</b> do Secretário. Só pode ser impresso depois de assinado.${A.assinado ? ' (A assinatura anterior foi cancelada porque os dados do cartão mudaram.)' : ''}</div>`);
     const podeImprimir = !precisaAssinar || b.exigir_assinatura === false;
     main.innerHTML = `
@@ -291,7 +291,8 @@
       <div class="painel"><h2>Cartão</h2><div class="dados">
         ${linha('Data de emissão', br(b.data_emissao))}${linha('Validade', val(b.validade))}${linha('Via', b.via + 'ª')}
         ${linha('Órgão expedidor', CFG.orgao_expedidor)}
-        ${linha('Assinatura eletrônica', A.valida ? `${A.nome}${A.cargo ? ' – ' + A.cargo : ''}, em ${brh(A.em)} · código ${A.codigo}` : 'aguardando assinatura')}
+        ${linha(A.tipo === 'chancela' ? 'Assinatura (chancela)' : 'Assinatura eletrônica', !A.valida ? (CFG.modo_assinatura === 'chancela' ? 'sem assinante definido em Configurações' : 'aguardando assinatura')
+          : A.tipo === 'chancela' ? `${A.nome}${A.cargo ? ' – ' + A.cargo : ''} · código ${A.codigo}` : `${A.nome}${A.cargo ? ' – ' + A.cargo : ''}, em ${brh(A.em)} · código ${A.codigo}`)}
         ${b.servidor_responsavel ? linha('Servidor responsável', b.servidor_responsavel.nome + (b.servidor_responsavel.matricula ? ' – matrícula ' + b.servidor_responsavel.matricula : '')) : ''}
       </div></div>
       ${b.cpf !== undefined ? `
@@ -465,6 +466,7 @@
   // ---------- CONFIGURAÇÕES
   async function config() {
     CFG = await api('GET', 'config');
+    const assinantes = (await api('GET', 'usuarios')).filter(u => u.pode_assinar && u.ativo);
     const v = k => esc(CFG[k]);
     main.innerHTML = `
       <h1>Configurações</h1><p class="sub">Somente administradores.</p>
@@ -479,11 +481,17 @@
         <label class="c3">Próximo nº de registro – PcD<input name="proximo_registro_pcd" type="number" min="1" value="${v('proximo_registro_pcd')}"><small>Número que o próximo cartão de PcD vai receber</small></label>
         <label class="c3">Validade – PcD temporária (meses)<input name="validade_meses_pcd_temporaria" type="number" min="1" value="${v('validade_meses_pcd_temporaria')}"><small>Idoso e PcD permanente não têm validade (Res. Contran 1.012/2024)</small></label>
       </div></div>
-      <div class="painel"><h2>Assinatura eletrônica</h2><div class="grade">
-        <label class="c6">Exigir assinatura do Secretário antes de imprimir<select name="exigir_assinatura">
-          <option value="1" ${CFG.exigir_assinatura !== '0' ? 'selected' : ''}>Sim – o cartão só imprime depois de assinado</option>
+      <div class="painel"><h2>Assinatura das credenciais</h2><div class="grade">
+        <label class="c6">Como as credenciais são assinadas<select name="modo_assinatura">
+          <option value="chancela" ${CFG.modo_assinatura !== 'individual' ? 'selected' : ''}>Chancela da Secretária – todas saem assinadas automaticamente</option>
+          <option value="individual" ${CFG.modo_assinatura === 'individual' ? 'selected' : ''}>Assinatura individual – o Secretário assina cada credencial com a senha</option></select></label>
+        <label class="c6">Assinatura usada na chancela<select name="assinante_chancela"><option value="">Secretária (automático)</option>
+          ${assinantes.map(u => `<option value="${u.id}" ${String(CFG.assinante_chancela) === String(u.id) ? 'selected' : ''}>${esc(u.nome)}${u.cargo ? ' – ' + esc(u.cargo) : ''}</option>`).join('')}</select>
+          <small>Só aparecem usuários com "Pode assinar" marcado em <a href="#/usuarios">Usuários</a>.</small></label>
+        <label class="c6">Ato que autoriza a chancela <small>(sai na credencial, ex.: Portaria SSM nº 12/2026)</small><input name="ato_chancela" value="${v('ato_chancela')}" placeholder="opcional"></label>
+        <label class="c6">No modo individual: exigir assinatura antes de imprimir<select name="exigir_assinatura">
+          <option value="1" ${CFG.exigir_assinatura !== '0' ? 'selected' : ''}>Sim – só imprime depois de assinada</option>
           <option value="0" ${CFG.exigir_assinatura === '0' ? 'selected' : ''}>Não – pode imprimir sem assinatura</option></select></label>
-        <div class="c6" style="align-self:end"><small>Quem pode assinar é definido em <a href="#/usuarios">Usuários</a> (marque "Pode assinar cartões").</small></div>
       </div></div>
       <div class="painel"><h2>Dados impressos no cartão</h2><div class="grade">
         <label class="c4">Órgão expedidor<input name="orgao_expedidor" value="${v('orgao_expedidor')}"></label>
@@ -498,7 +506,7 @@
       <a class="btn primario" href="/api/backup">Baixar backup completo (.zip)</a></div>`;
     $('#fc').addEventListener('submit', async e => {
       e.preventDefault();
-      try { await api('PUT', 'config', Object.fromEntries(new FormData(e.target))); CFG = await api('GET', 'config'); toast('Configurações salvas.'); }
+      try { await api('PUT', 'config', Object.fromEntries(new FormData(e.target))); CFG = await api('GET', 'config'); toast('Configurações salvas.'); iniciar(); }
       catch (err) { $('#erro-c').textContent = err.message; }
     });
   }

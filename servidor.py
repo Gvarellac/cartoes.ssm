@@ -209,7 +209,8 @@ def iniciar_banco():
     for tabela, col, tipo in (("usuarios", "cargo", "TEXT"), ("usuarios", "pode_assinar", "INTEGER DEFAULT 0"),
                               ("usuarios", "assinatura_arquivo", "TEXT"),
                               ("beneficiarios", "emitido_por", "INTEGER"), ("beneficiarios", "assinado_por", "INTEGER"),
-                              ("beneficiarios", "assinado_em", "TEXT"), ("beneficiarios", "assinatura_hash", "TEXT")):
+                              ("beneficiarios", "assinado_em", "TEXT"), ("beneficiarios", "assinatura_hash", "TEXT"),
+                              ("beneficiarios", "assinatura_tipo", "TEXT")):
         if col not in [r[1] for r in c.execute(f"PRAGMA table_info({tabela})")]:
             c.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")
     c.execute("UPDATE beneficiarios SET emitido_por=criado_por WHERE emitido_por IS NULL")
@@ -224,6 +225,9 @@ def iniciar_banco():
         "municipio": "BAGÉ",
         "uf": "RS",
         "exigir_assinatura": "1",
+        "modo_assinatura": "chancela",      # chancela = assinatura da Secretária aplicada automaticamente em toda credencial
+        "assinante_chancela": "",           # id do usuário cuja assinatura é usada na chancela (vazio = Secretária)
+        "ato_chancela": "",                 # ex.: Portaria SSM nº 12/2026 (aparece na credencial)
         "chave_assinatura": secrets.token_hex(32),   # segredo dos códigos de verificação (nunca sai do servidor)
     }
     for k, v in padrao.items():
@@ -281,6 +285,12 @@ def iniciar_banco():
                   (x.get("nome", login), login, hash_senha(x["senha"]), x.get("perfil") if x.get("perfil") in PERFIS else "atendente",
                    x.get("matricula") or "", x.get("cargo") or "", 1 if x.get("pode_assinar") else 0, agora()))
         print(f"  Usuário criado: {login}")
+    if cfg(c, "modo_assinatura") == "chancela":
+        n = 0
+        for (bid,) in c.execute("SELECT id FROM beneficiarios WHERE status='ativo'").fetchall():
+            n += garantir_chancela(c, bid, None)
+        if n:
+            print(f"  Chancela da Secretária aplicada em {n} credencial(is).")
     c.commit()
     c.close()
 
@@ -392,8 +402,10 @@ def assinatura_info(c, b):
     u = c.execute("SELECT nome, cargo, assinatura_arquivo FROM usuarios WHERE id=?", (b["assinado_por"],)).fetchone()
     h = b["assinatura_hash"] or ""
     valida = bool(h) and hmac.compare_digest(codigo_assinatura(c, b, b["assinado_por"], b["assinado_em"]), h)
+    tipo = b["assinatura_tipo"] or "eletronica"
     return {"assinado": True, "valida": valida, "nome": u["nome"] if u else "—", "cargo": (u["cargo"] if u else "") or "",
-            "em": b["assinado_em"], "codigo": f"{h[:4]}-{h[4:8]}".upper(),
+            "em": b["assinado_em"], "codigo": f"{h[:4]}-{h[4:8]}".upper(), "tipo": tipo,
+            "ato": cfg(c, "ato_chancela") if tipo == "chancela" else "",
             "imagem": f"/api/assinatura/{b['assinado_por']}" if u and u["assinatura_arquivo"] else ""}
 
 
@@ -408,9 +420,46 @@ def limpar_assinatura(c, bid):
 def assinar_cartao(c, b, u):
     quando = agora()
     h = codigo_assinatura(c, b, u["id"], quando)
-    c.execute("UPDATE beneficiarios SET assinado_por=?, assinado_em=?, assinatura_hash=? WHERE id=?", (u["id"], quando, h, b["id"]))
-    registrar(c, b["id"], u["id"], "Cartão assinado eletronicamente",
+    c.execute("UPDATE beneficiarios SET assinado_por=?, assinado_em=?, assinatura_hash=?, assinatura_tipo='eletronica' WHERE id=?",
+              (u["id"], quando, h, b["id"]))
+    registrar(c, b["id"], u["id"], "Credencial assinada eletronicamente",
               f"{u['nome']}{' – ' + u['cargo'] if u['cargo'] else ''} · código {h[:4].upper()}-{h[4:8].upper()}")
+
+
+def chancela_ativa(c):
+    return cfg(c, "modo_assinatura") == "chancela"
+
+
+def assinante_chancela(c):
+    """Usuário cuja assinatura vai em todas as credenciais (a Secretária)."""
+    q = "SELECT * FROM usuarios WHERE pode_assinar=1 AND ativo=1"
+    escolhido = (cfg(c, "assinante_chancela") or "").strip()
+    if escolhido.isdigit():
+        u = c.execute(q + " AND id=?", (int(escolhido),)).fetchone()
+        if u:
+            return u
+    return (c.execute(q + " AND login='carem.nascimento'").fetchone() or
+            c.execute(q + " AND cargo LIKE 'Secret%ria Municipal%' ORDER BY id").fetchone() or
+            c.execute(q + " ORDER BY id").fetchone())
+
+
+def garantir_chancela(c, bid, uid):
+    """No modo chancela, toda credencial ativa sai com a assinatura da Secretária. Retorna 1 se aplicou."""
+    if not chancela_ativa(c):
+        return 0
+    b = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
+    if not b or b["status"] != "ativo" or assinatura_ok(c, b):
+        return 0
+    s = assinante_chancela(c)
+    if not s:
+        return 0
+    quando = agora()
+    h = codigo_assinatura(c, b, s["id"], quando)
+    c.execute("UPDATE beneficiarios SET assinado_por=?, assinado_em=?, assinatura_hash=?, assinatura_tipo='chancela' WHERE id=?",
+              (s["id"], quando, h, bid))
+    registrar(c, bid, uid, "Chancela da Secretária aplicada",
+              f"{s['nome']}{' – ' + s['cargo'] if s['cargo'] else ''} · código {h[:4].upper()}-{h[4:8].upper()}")
+    return 1
 
 
 def benef_dict(b, completo=True):
@@ -636,13 +685,21 @@ class Handler(BaseHTTPRequestHandler):
             self.exigir(c, "admin")
             d = self.corpo_json()
             for k, v in d.items():
-                if k.startswith("chave_"):
+                if k.startswith("chave_") or k == "migracao_res1012":
                     continue
+                if k == "modo_assinatura" and v not in ("chancela", "individual"):
+                    raise Erro(400, "Modo de assinatura inválido.")
+                if k == "assinante_chancela" and str(v).strip() and not c.execute(
+                        "SELECT 1 FROM usuarios WHERE id=? AND pode_assinar=1 AND ativo=1", (str(v).strip(),)).fetchone():
+                    raise Erro(400, "O assinante da chancela precisa ser um usuário ativo com permissão para assinar.")
                 if c.execute("SELECT 1 FROM config WHERE chave=?", (k,)).fetchone():
                     if k.startswith("proximo_registro") or k.startswith("validade_anos") or k == "validade_meses_pcd_temporaria":
                         if not str(v).isdigit() or int(v) < 1:
                             raise Erro(400, f"Valor inválido para {k}.")
                     c.execute("UPDATE config SET valor=? WHERE chave=?", (str(v).strip().rstrip("/"), k))
+            if chancela_ativa(c):
+                for (bid,) in c.execute("SELECT id FROM beneficiarios WHERE status='ativo'").fetchall():
+                    garantir_chancela(c, bid, self.sessao(c)["id"])
             c.commit()
             return self.enviar(200, {"ok": True})
 
@@ -856,6 +913,7 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute("UPDATE config SET valor=? WHERE chave=?", (str(reg + 1), chave))
                     registrar(c, bid, u["id"], "Cadastro e emissão da credencial", f"Registro nº {fmt_reg(reg)}/{emissao.year} – validade {validade_txt(validade).lower()}")
                     self.salvar_laudo(c, bid, u["id"], d)
+                    garantir_chancela(c, bid, u["id"])
                     c.commit()
                 return self.enviar(200, {"ok": True, "id": bid, "registro": reg, "registro_txt": f"{fmt_reg(reg)}/{emissao.year}"})
 
@@ -870,7 +928,15 @@ class Handler(BaseHTTPRequestHandler):
             d = benef_dict(b)
             d["link_qr"] = f"{cfg(c, 'endereco_base')}/v/{b['token']}"
             d["assinatura"] = assinatura_info(c, b)
-            d["exigir_assinatura"] = cfg(c, "exigir_assinatura") != "0"
+            if garantir_chancela(c, bid, u["id"]):
+                c.commit()
+                b = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
+                d.update(benef_dict(b)); d["link_qr"] = f"{cfg(c, 'endereco_base')}/v/{b['token']}"
+                d["historico"] = [dict(x) for x in c.execute(
+                    "SELECT h.data, h.acao, h.detalhe, u.nome usuario FROM historico h LEFT JOIN usuarios u ON u.id=h.usuario_id WHERE beneficiario_id=? ORDER BY h.id DESC", (bid,))]
+            d["assinatura"] = assinatura_info(c, b)
+            d["modo_assinatura"] = cfg(c, "modo_assinatura")
+            d["exigir_assinatura"] = chancela_ativa(c) or cfg(c, "exigir_assinatura") != "0"
             e = c.execute("SELECT nome, matricula FROM usuarios WHERE id=?", (b["emitido_por"],)).fetchone()
             d["servidor_responsavel"] = {"id": b["emitido_por"], "nome": e["nome"], "matricula": e["matricula"] or ""} if e else None
             d["historico"] = [dict(x) for x in c.execute(
@@ -916,7 +982,10 @@ class Handler(BaseHTTPRequestHandler):
             b2 = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
             if b2["assinado_por"] and not assinatura_ok(c, b2):
                 limpar_assinatura(c, bid)
-                registrar(c, bid, u["id"], "Assinatura cancelada", "Dados impressos no cartão foram alterados. É preciso assinar de novo.")
+                if chancela_ativa(c):
+                    garantir_chancela(c, bid, u["id"])
+                else:
+                    registrar(c, bid, u["id"], "Assinatura cancelada", "Dados impressos na credencial foram alterados. É preciso assinar de novo.")
             self.salvar_laudo(c, bid, u["id"], d)
             c.commit()
             return self.enviar(200, {"ok": True})
@@ -934,6 +1003,7 @@ class Handler(BaseHTTPRequestHandler):
                       (novo, motivo if novo != "ativo" else None, agora(), bid))
             nomes = {"ativo": "Cartão reativado", "suspenso": "Cartão SUSPENSO", "cassado": "Cartão CASSADO"}
             registrar(c, bid, u["id"], nomes[novo], motivo)
+            garantir_chancela(c, bid, u["id"])
             c.commit()
             return self.enviar(200, {"ok": True})
 
@@ -956,6 +1026,7 @@ class Handler(BaseHTTPRequestHandler):
                 c.execute("UPDATE beneficiarios SET token=?, via=via+1, atualizado_em=?, emitido_por=?,"
                           " assinado_por=NULL, assinado_em=NULL, assinatura_hash=NULL WHERE id=?", (tok, agora(), u["id"], bid))
                 registrar(c, bid, u["id"], f"Emitida {b['via']+1}ª via", f"Motivo: {motivo}. QR anterior invalidado.")
+            garantir_chancela(c, bid, u["id"])
             c.commit()
             return self.enviar(200, {"ok": True})
 
@@ -970,7 +1041,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if m == "POST" and acao == "impressao":
             u = self.exigir(c, "admin", "atendente")
-            if cfg(c, "exigir_assinatura") != "0" and not assinatura_ok(c, b):
+            garantir_chancela(c, bid, u["id"])
+            b = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
+            if (chancela_ativa(c) or cfg(c, "exigir_assinatura") != "0") and not assinatura_ok(c, b):
                 raise Erro(400, "O cartão precisa ser assinado antes de imprimir.")
             registrar(c, bid, u["id"], "Cartão impresso", f"{b['via']}ª via")
             c.commit()
@@ -1005,7 +1078,11 @@ class Handler(BaseHTTPRequestHandler):
                       ("Validade", validade_txt(b["validade"])),
                       ("Via", f"{b['via']}ª via"), ("Órgão expedidor", cfg(c, "orgao_expedidor") + " – " + cfg(c, "municipio") + "/" + cfg(c, "uf"))]
             ai = assinatura_info(c, b)
-            if ai["valida"]:
+            if ai["valida"] and ai["tipo"] == "chancela":
+                linhas.append(("Assinatura (chancela eletrônica)", f"{ai['nome']}{' – ' + ai['cargo'] if ai['cargo'] else ''}"
+                               + (f" · {ai['ato']}" if ai["ato"] else "")))
+                linhas.append(("Código de verificação", ai["codigo"]))
+            elif ai["valida"]:
                 quando = dt.datetime.strptime(ai["em"], "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y às %H:%M")
                 linhas.append(("Assinado eletronicamente por", f"{ai['nome']}{' – ' + ai['cargo'] if ai['cargo'] else ''}, em {quando}"))
                 linhas.append(("Código de verificação", ai["codigo"]))
