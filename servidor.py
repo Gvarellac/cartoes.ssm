@@ -74,6 +74,8 @@ PERFIS = ("admin", "atendente", "fiscal")
 TIPOS = ("idoso", "pcd")
 STATUS = ("ativo", "suspenso", "cassado")
 
+VALIDADE_INDETERMINADA = "9999-12-31"   # Res. Contran 1.012/2024: idoso e PcD permanente não têm prazo de validade
+
 CAMPOS_BENEF = [
     "tipo", "nome", "cpf", "data_nascimento", "sexo", "telefone", "email",
     "cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf",
@@ -217,7 +219,8 @@ def iniciar_banco():
         "proximo_registro_pcd": "1302",
         "validade_anos_idoso": "5",
         "validade_anos_pcd": "5",
-        "orgao_expedidor": "SSM",
+        "validade_meses_pcd_temporaria": "12",
+        "orgao_expedidor": "SSM – SECRETARIA MUNICIPAL DE SEGURANÇA E MOBILIDADE URBANA",
         "municipio": "BAGÉ",
         "uf": "RS",
         "exigir_assinatura": "1",
@@ -249,6 +252,21 @@ def iniciar_banco():
                 print(f"  SENHA INICIAL DO ADMIN (anote): {senha_ini}")
         c.execute("INSERT INTO usuarios(nome, login, senha, perfil, trocar_senha, criado_em) VALUES (?,?,?,?,1,?)",
                   ("Administrador", "admin", hash_senha(senha_ini), "admin", agora()))
+    # Adequação à Res. Contran 1.012/2024 (uma vez só): idoso e PcD permanente passam a ter validade indeterminada
+    if cfg(c, "migracao_res1012") != "1":
+        alvo = c.execute("SELECT id FROM beneficiarios WHERE validade!=? AND (tipo='idoso' OR (tipo='pcd' AND COALESCE(laudo_temporario,0)=0))",
+                         (VALIDADE_INDETERMINADA,)).fetchall()
+        for (bid,) in alvo:
+            c.execute("UPDATE beneficiarios SET validade=?, assinado_por=NULL, assinado_em=NULL, assinatura_hash=NULL WHERE id=?",
+                      (VALIDADE_INDETERMINADA, bid))
+            registrar(c, bid, None, "Validade indeterminada (Res. Contran 1.012/2024)",
+                      "Credencial de idoso / PcD permanente deixou de ter prazo. Precisa ser assinada e impressa de novo no novo modelo.")
+        if cfg(c, "orgao_expedidor") == "SSM":
+            c.execute("UPDATE config SET valor=? WHERE chave='orgao_expedidor'", ("SSM – SECRETARIA MUNICIPAL DE SEGURANÇA E MOBILIDADE URBANA",))
+        c.execute("INSERT OR REPLACE INTO config(chave, valor) VALUES ('migracao_res1012', '1')")
+        if alvo:
+            print(f"  Res. 1.012/2024: {len(alvo)} credencial(is) passaram a ter validade indeterminada.")
+
     # Usuários iniciais definidos pela variável USUARIOS_INICIAIS (JSON). Só cria quem ainda não existe.
     try:
         iniciais = json.loads(os.environ.get("USUARIOS_INICIAIS") or "[]")
@@ -301,6 +319,34 @@ def fmt_reg(n):
         return f"{int(n):,}".replace(",", ".")
     except (TypeError, ValueError):
         return str(n)
+
+
+def registro_txt(b):
+    """Nº de registro com o ano da emissão: 12.132/2026"""
+    return f"{fmt_reg(b['registro'])}/{str(b['data_emissao'])[:4]}"
+
+
+def validade_txt(v):
+    return "Indeterminada" if not v or str(v).startswith("9999") else dt.date.fromisoformat(v).strftime("%d/%m/%Y")
+
+
+def calcular_validade(c, tipo, temporario, informada, emissao):
+    """Idoso e PcD permanente: sem validade. PcD temporária: data informada ou o prazo padrão do município."""
+    if tipo != "pcd" or not temporario:
+        return VALIDADE_INDETERMINADA
+    if informada:
+        try:
+            v = dt.date.fromisoformat(informada)
+        except ValueError:
+            raise Erro(400, "Data de validade inválida.")
+        if v <= emissao:
+            raise Erro(400, "A validade precisa ser depois da data de emissão.")
+        return v.isoformat()
+    meses = int(cfg(c, "validade_meses_pcd_temporaria") or 12)
+    a, m = divmod(emissao.month - 1 + meses, 12)
+    ano, mes = emissao.year + a, m + 1
+    dia = min(emissao.day, [31, 29 if ano % 4 == 0 and (ano % 100 or ano % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1])
+    return dt.date(ano, mes, dia).isoformat()
 
 
 def so_digitos(s):
@@ -370,9 +416,10 @@ def assinar_cartao(c, b, u):
 def benef_dict(b, completo=True):
     d = dict(b)
     d["situacao"] = situacao(b)
+    d["registro_txt"] = registro_txt(b)
     if not completo:
         d = {k: d[k] for k in ("id", "tipo", "nome", "cpf", "registro", "data_emissao", "validade",
-                               "status", "situacao", "via", "bairro", "telefone", "assinado_por")}
+                               "status", "situacao", "via", "bairro", "telefone", "assinado_por", "registro_txt", "laudo_temporario")}
     return d
 
 
@@ -591,7 +638,7 @@ class Handler(BaseHTTPRequestHandler):
                 if k.startswith("chave_"):
                     continue
                 if c.execute("SELECT 1 FROM config WHERE chave=?", (k,)).fetchone():
-                    if k.startswith("proximo_registro") or k.startswith("validade_anos"):
+                    if k.startswith("proximo_registro") or k.startswith("validade_anos") or k == "validade_meses_pcd_temporaria":
                         if not str(v).isdigit() or int(v) < 1:
                             raise Erro(400, f"Valor inválido para {k}.")
                     c.execute("UPDATE config SET valor=? WHERE chave=?", (str(v).strip().rstrip("/"), k))
@@ -685,10 +732,10 @@ class Handler(BaseHTTPRequestHandler):
         if r == "consultas":
             self.exigir(c, "admin", "atendente", "fiscal")
             lim = min(int((qs.get("limite") or ["200"])[0]), 2000)
-            rows = c.execute("""SELECT q.data, q.ip, q.resultado, q.origem, b.nome, b.tipo, b.registro, u.nome agente
+            rows = c.execute("""SELECT q.data, q.ip, q.resultado, q.origem, b.nome, b.tipo, b.registro, b.data_emissao, u.nome agente
                                 FROM consultas q LEFT JOIN beneficiarios b ON b.id=q.beneficiario_id
                                 LEFT JOIN usuarios u ON u.id=q.usuario_id ORDER BY q.id DESC LIMIT ?""", (lim,)).fetchall()
-            return self.enviar(200, [dict(x) for x in rows])
+            return self.enviar(200, [dict(x, registro_txt=registro_txt(x) if x["registro"] else "") for x in rows])
 
         if r == "exportar.csv":
             self.exigir(c, "admin")
@@ -698,7 +745,7 @@ class Handler(BaseHTTPRequestHandler):
                     "bairro", "cidade", "uf", "deficiencia_tipo", "cid", "data_emissao", "validade", "status", "via"]
             w.writerow(cols + ["situacao"])
             for b in c.execute("SELECT * FROM beneficiarios ORDER BY tipo, registro"):
-                w.writerow([b[k] for k in cols] + [situacao(b)])
+                w.writerow([registro_txt(b) if k == "registro" else validade_txt(b[k]) if k == "validade" else b[k] for k in cols] + [situacao(b)])
             return self.enviar(200, "﻿" + buf.getvalue(), "text/csv; charset=utf-8",
                                {"Content-Disposition": f'attachment; filename="beneficiarios-{hoje():%Y%m%d}.csv"'})
 
@@ -744,10 +791,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise Erro(400, f"Beneficiário tem {idade} anos. O cartão de idoso exige 60 anos ou mais.")
         if d["tipo"] == "pcd" and not (d.get("cid") or d.get("deficiencia_tipo")):
             raise Erro(400, "Para PcD, informe o tipo de deficiência e/ou o CID do laudo.")
-        dup = c.execute("SELECT id, registro FROM beneficiarios WHERE cpf=? AND tipo=? AND status!='cassado' AND id!=?",
+        dup = c.execute("SELECT id, registro, data_emissao FROM beneficiarios WHERE cpf=? AND tipo=? AND status!='cassado' AND id!=?",
                         (d["cpf"], d["tipo"], bid or 0)).fetchone()
         if dup:
-            raise Erro(400, f"Já existe cartão deste tipo para este CPF (registro nº {fmt_reg(dup['registro'])}). Use renovação ou 2ª via.")
+            raise Erro(400, f"Já existe cartão deste tipo para este CPF (registro nº {registro_txt(dup)}). Use renovação ou 2ª via.")
         d["laudo_temporario"] = 1 if d.get("laudo_temporario") in (1, True, "1", "true", "on") else 0
         return d
 
@@ -773,8 +820,9 @@ class Handler(BaseHTTPRequestHandler):
             if m == "GET":
                 self.exigir(c)
                 q = (qs.get("q") or [""])[0].strip()
-                if re.fullmatch(r"\d{1,3}(\.\d{3})+", q):   # "12.132" -> "12132"
-                    q = q.replace(".", "")
+                m_reg = re.fullmatch(r"(\d{1,3}(?:\.\d{3})+|\d+)(?:/\d{4})?", q)   # "12.132/2026" -> "12132"
+                if m_reg:
+                    q = m_reg.group(1).replace(".", "")
                 sql, args = "SELECT * FROM beneficiarios WHERE 1=1", []
                 if q:
                     dig = so_digitos(q)
@@ -798,23 +846,17 @@ class Handler(BaseHTTPRequestHandler):
                     while c.execute("SELECT 1 FROM beneficiarios WHERE tipo=? AND registro=?", (d["tipo"], reg)).fetchone():
                         reg += 1
                     emissao = hoje()
-                    if d.get("validade"):
-                        try:
-                            validade = dt.date.fromisoformat(d["validade"])
-                        except ValueError:
-                            raise Erro(400, "Data de validade inválida.")
-                    else:
-                        validade = somar_anos(emissao, int(cfg(c, f"validade_anos_{d['tipo']}")))
+                    validade = calcular_validade(c, d["tipo"], d["laudo_temporario"], d.get("validade"), emissao)
                     cols = CAMPOS_BENEF + ["registro", "data_emissao", "validade", "status", "token", "via", "criado_por", "criado_em", "atualizado_em", "emitido_por"]
-                    vals = [d.get(k) for k in CAMPOS_BENEF] + [reg, emissao.isoformat(), validade.isoformat(), "ativo",
+                    vals = [d.get(k) for k in CAMPOS_BENEF] + [reg, emissao.isoformat(), validade, "ativo",
                                                                 novo_token(c), 1, u["id"], agora(), agora(), u["id"]]
                     cur = c.execute(f"INSERT INTO beneficiarios({','.join(cols)}) VALUES ({','.join('?'*len(cols))})", vals)
                     bid = cur.lastrowid
                     c.execute("UPDATE config SET valor=? WHERE chave=?", (str(reg + 1), chave))
-                    registrar(c, bid, u["id"], "Cadastro e emissão do cartão", f"Registro nº {fmt_reg(reg)} – validade {validade:%d/%m/%Y}")
+                    registrar(c, bid, u["id"], "Cadastro e emissão da credencial", f"Registro nº {fmt_reg(reg)}/{emissao.year} – validade {validade_txt(validade).lower()}")
                     self.salvar_laudo(c, bid, u["id"], d)
                     c.commit()
-                return self.enviar(200, {"ok": True, "id": bid, "registro": reg})
+                return self.enviar(200, {"ok": True, "id": bid, "registro": reg, "registro_txt": f"{fmt_reg(reg)}/{emissao.year}"})
 
         bid = int(p[0])
         b = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
@@ -829,7 +871,7 @@ class Handler(BaseHTTPRequestHandler):
             d["assinatura"] = assinatura_info(c, b)
             d["exigir_assinatura"] = cfg(c, "exigir_assinatura") != "0"
             e = c.execute("SELECT nome, matricula FROM usuarios WHERE id=?", (b["emitido_por"],)).fetchone()
-            d["servidor_responsavel"] = {"nome": e["nome"], "matricula": e["matricula"] or ""} if e else None
+            d["servidor_responsavel"] = {"id": b["emitido_por"], "nome": e["nome"], "matricula": e["matricula"] or ""} if e else None
             d["historico"] = [dict(x) for x in c.execute(
                 "SELECT h.data, h.acao, h.detalhe, u.nome usuario FROM historico h LEFT JOIN usuarios u ON u.id=h.usuario_id WHERE beneficiario_id=? ORDER BY h.id DESC", (bid,))]
             d["consultas"] = [dict(x) for x in c.execute(
@@ -838,7 +880,7 @@ class Handler(BaseHTTPRequestHandler):
                 c.execute("INSERT INTO consultas(beneficiario_id, token, data, ip, usuario_id, resultado, origem) VALUES (?,?,?,?,?,?,?)",
                           (bid, b["token"], agora(), self.ip_cliente(), u["id"], d["situacao"], "Sistema"))
                 c.commit()
-                d = {k: d[k] for k in ("id", "tipo", "nome", "registro", "data_emissao", "validade", "situacao", "status",
+                d = {k: d[k] for k in ("id", "tipo", "nome", "registro", "registro_txt", "data_emissao", "validade", "situacao", "status",
                                        "motivo_status", "via", "consultas", "assinatura")}
             return self.enviar(200, d)
 
@@ -861,6 +903,15 @@ class Handler(BaseHTTPRequestHandler):
                       [d.get(k) for k in CAMPOS_BENEF if k != "tipo"] + [agora(), bid])
             mud = [k for k in CAMPOS_BENEF if k != "tipo" and str(b[k] or "") != str(d.get(k) or "")]
             registrar(c, bid, u["id"], "Dados atualizados", ", ".join(mud) if mud else "sem alterações")
+            b2 = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
+            temp = b2["tipo"] == "pcd" and b2["laudo_temporario"]
+            if temp and b2["validade"] == VALIDADE_INDETERMINADA:
+                nova = calcular_validade(c, "pcd", 1, None, dt.date.fromisoformat(b2["data_emissao"]))
+                c.execute("UPDATE beneficiarios SET validade=? WHERE id=?", (nova, bid))
+                registrar(c, bid, u["id"], "Validade definida", f"Deficiência temporária – validade {validade_txt(nova)}")
+            elif not temp and b2["validade"] != VALIDADE_INDETERMINADA:
+                c.execute("UPDATE beneficiarios SET validade=? WHERE id=?", (VALIDADE_INDETERMINADA, bid))
+                registrar(c, bid, u["id"], "Validade indeterminada", "Res. Contran 1.012/2024")
             b2 = c.execute("SELECT * FROM beneficiarios WHERE id=?", (bid,)).fetchone()
             if b2["assinado_por"] and not assinatura_ok(c, b2):
                 limpar_assinatura(c, bid)
@@ -893,14 +944,12 @@ class Handler(BaseHTTPRequestHandler):
             tok = novo_token(c)
             if acao == "renovar":
                 emissao = hoje()
-                if d.get("validade"):
-                    validade = dt.date.fromisoformat(d["validade"])
-                else:
-                    validade = somar_anos(emissao, int(cfg(c, f"validade_anos_{b['tipo']}")))
+                validade = calcular_validade(c, b["tipo"], b["laudo_temporario"], d.get("validade"), emissao)
                 c.execute("UPDATE beneficiarios SET data_emissao=?, validade=?, token=?, via=via+1, status='ativo', motivo_status=NULL, atualizado_em=?,"
                           " emitido_por=?, assinado_por=NULL, assinado_em=NULL, assinatura_hash=NULL WHERE id=?",
-                          (emissao.isoformat(), validade.isoformat(), tok, agora(), u["id"], bid))
-                registrar(c, bid, u["id"], "Cartão renovado", f"Nova validade {validade:%d/%m/%Y} – {b['via']+1}ª via. QR anterior invalidado.")
+                          (emissao.isoformat(), validade, tok, agora(), u["id"], bid))
+                registrar(c, bid, u["id"], "Credencial renovada / reemitida",
+                          f"Nº {fmt_reg(b['registro'])}/{emissao.year} – validade {validade_txt(validade).lower()} – {b['via']+1}ª via. QR anterior invalidado.")
             else:
                 motivo = (d.get("motivo") or "").strip() or "não informado"
                 c.execute("UPDATE beneficiarios SET token=?, via=via+1, atualizado_em=?, emitido_por=?,"
@@ -939,20 +988,20 @@ class Handler(BaseHTTPRequestHandler):
                   (b["id"] if b else None, token, agora(), ip, u["id"] if u else None, sit, "QR"))
         c.commit()
         info = {
-            "ativo": ("VÁLIDO", "#0b7a3b", "Cartão regular. Estacionamento autorizado nas vagas especiais sinalizadas."),
-            "vencido": ("VENCIDO", "#b42318", "A validade do cartão expirou (item 2.5). Não autoriza o uso da vaga."),
-            "suspenso": ("SUSPENSO", "#b54708", "A autorização está suspensa pelo órgão de trânsito."),
-            "cassado": ("CASSADO", "#7a0916", "A autorização foi cassada pelo órgão de trânsito."),
-            "invalido": ("NÃO RECONHECIDO", "#475467", "Este QR não corresponde a nenhum cartão em vigor. "
-                         "Pode ser uma via antiga substituída, cópia ou cartão falsificado (itens 2.2 e 2.3). Confira o nº de registro com a central."),
+            "ativo": ("VÁLIDA", "#0b7a3b", "Credencial regular. Estacionamento autorizado nas vagas reservadas sinalizadas."),
+            "vencido": ("VENCIDA", "#b42318", "A validade desta credencial (deficiência temporária) expirou. Não autoriza o uso da vaga."),
+            "suspenso": ("SUSPENSA", "#b54708", "A credencial está suspensa pelo órgão de trânsito."),
+            "cassado": ("CASSADA", "#7a0916", "A credencial foi cassada pelo órgão de trânsito."),
+            "invalido": ("NÃO RECONHECIDA", "#475467", "Este QR não corresponde a nenhuma credencial em vigor. "
+                         "Pode ser uma via antiga substituída, cópia ou credencial falsificada. Confira o nº de registro com a central."),
         }[sit]
         e = html.escape
         corpo = ""
         if b:
-            tipo = "IDOSO (60+) – Res. 303/08" if b["tipo"] == "idoso" else "PESSOA COM DEFICIÊNCIA – Res. 304/08"
-            linhas = [("Beneficiário", b["nome"]), ("Tipo", tipo), ("Nº do registro", fmt_reg(b["registro"])),
+            tipo = "PESSOA IDOSA" if b["tipo"] == "idoso" else "PESSOA COM DEFICIÊNCIA"
+            linhas = [("Beneficiário", b["nome"]), ("Tipo", tipo + " – Res. Contran 965/2022"), ("Nº do registro", registro_txt(b)),
                       ("Emissão", dt.date.fromisoformat(b["data_emissao"]).strftime("%d/%m/%Y")),
-                      ("Validade", dt.date.fromisoformat(b["validade"]).strftime("%d/%m/%Y")),
+                      ("Validade", validade_txt(b["validade"])),
                       ("Via", f"{b['via']}ª via"), ("Órgão expedidor", cfg(c, "orgao_expedidor") + " – " + cfg(c, "municipio") + "/" + cfg(c, "uf"))]
             ai = assinatura_info(c, b)
             if ai["valida"]:
@@ -968,7 +1017,7 @@ class Handler(BaseHTTPRequestHandler):
             corpo = "".join(f"<div class='l'><span>{e(k)}</span><b>{e(v)}</b></div>" for k, v in linhas)
         quem = f"Consulta registrada por {e(u['nome'])}" if u else "Consulta registrada"
         pagina = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Consulta de cartão – SSM Bagé</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Consulta de credencial – SSM Bagé</title>
 <style>
 body{{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f2f4f7;color:#101828}}
 .top{{background:#1c1c1c;color:#fff;padding:14px 16px;display:flex;gap:12px;align-items:center}}
@@ -982,10 +1031,10 @@ body{{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f2f4f7;color:#
 .rod{{text-align:center;color:#667085;font-size:12px;padding:8px 16px 30px}}
 </style></head><body>
 <div class="top"><img src="/img/brasao-bage.png" alt=""><div><b>Prefeitura Municipal de Bagé</b><br>
-Secretaria de Segurança e Mobilidade Urbana – SSM<br>Consulta de Cartão de Estacionamento – Vaga Especial</div></div>
+Secretaria de Segurança e Mobilidade Urbana – SSM<br>Consulta de Credencial de Estacionamento – Vaga Reservada</div></div>
 <div class="st"><h1>{info[0]}</h1><p>{e(info[2])}</p></div>
 {f'<div class="box">{corpo}</div>' if corpo else ''}
-<div class="rod">{quem} em {agora_dt():%d/%m/%Y às %H:%M:%S}.<br>Confira o nome com um documento oficial do beneficiário.</div>
+<div class="rod">{quem} em {agora_dt():%d/%m/%Y às %H:%M:%S}.<br>Confira o nome com um documento oficial do beneficiário. Credencial válida em todo o território nacional.</div>
 </body></html>"""
         self.enviar(200, pagina, "text/html; charset=utf-8")
 

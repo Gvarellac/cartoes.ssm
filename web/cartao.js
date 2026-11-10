@@ -1,153 +1,150 @@
-// Monta o cartão preenchido para impressão
+// Monta a credencial preenchida para impressão
+// Modelo: Res. Contran 965/2022, alterada pela Res. 1.012/2024 (Anexo III) – 129 x 84,5 mm
 (function () {
-  const MM = 96 / 25.4;
-  const CW = 148, CH = 105;           // tamanho de desenho do cartão (mm)
-  const CARIMBO_MM = 40;              // quadro de carimbo/assinatura no verso: 4 x 4 cm reais
+  const CW = 129, CH = 84.5;                // tamanho oficial da credencial (mm)
   const id = new URLSearchParams(location.search).get('id');
   const area = document.getElementById('area');
   let frente = null, verso = null;
 
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const br = iso => { if (!iso) return ''; const [a, m, d] = iso.split('-'); return `${d}/${m}/${a}`; };
+  const br = iso => { if (!iso) return ''; const [a, m, d] = String(iso).slice(0, 10).split('-'); return `${d}/${m}/${a}`; };
+  const indeterminada = v => !v || String(v).startsWith('9999');
 
-  // Formatos de impressão
-  const FORMATOS = {
-    // A4 em pé: frente em cima, verso embaixo (girado), para dobrar ao meio. Margem de 5 mm.
-    a4:  { pagina: [210, 297], page: 'A4 portrait', escala: 200 / CW },
-    // A4 deitado: cada lado ocupa a folha inteira. Margem de 5 mm.
-    a4l: { pagina: [297, 210], page: 'A4 landscape', escala: 287 / CW },
-    // A6: tamanho real do cartão
-    a6:  { pagina: [148, 105], page: '148mm 105mm', escala: 1 },
+  const TEXTO_ITEM2 = {
+    idoso: 'Esta credencial somente é válida para o estacionamento nas vagas reservadas, devidamente sinalizadas com o “Símbolo ou legenda Idoso”.',
+    pcd: 'Esta credencial somente é válida para o estacionamento nas vagas reservadas, devidamente sinalizadas com o “Símbolo Internacional de Acesso”.',
+  };
+  const SIMBOLO = {
+    idoso: ['<img src="/img/icone-60-branco.png" alt="" style="width:8.6mm;height:8.6mm">', '<img src="/img/icone-60-branco.png" alt="" style="width:48mm;height:48mm">'],
+    pcd: ['<svg style="width:8.6mm;height:8.6mm;color:#fff"><use href="#isa"/></svg>', '<svg style="width:46mm;height:46mm;color:#fff"><use href="#isa"/></svg>'],
   };
 
-  function ajustarTextos(root) {
-    root.querySelectorAll('.fit').forEach(el => {
-      el.style.transform = 'none';
-      const w = el.offsetWidth;   // largura de layout (ignora a ampliação do cartão)
-      if (w) el.style.transform = 'scaleX(' + (parseFloat(el.dataset.w) * MM / w) + ')';
-    });
-    root.querySelectorAll('[data-f="nome"]').forEach(el => {
-      el.style.fontSize = '';
-      let s = parseFloat(getComputedStyle(el).fontSize);
-      while (el.scrollWidth > el.clientWidth + 1 && s > 6) { s -= 0.25; el.style.fontSize = s + 'px'; }
-    });
-  }
+  // Impressão: a4 = frente em cima e verso embaixo (girado), para dobrar na linha tracejada; duplex = uma página por lado
+  const FORMATOS = { a4: 'A4 portrait', duplex: 'A4 portrait' };
 
-  // Verso: abre espaço de 4x4 cm (medida real impressa) para carimbo e assinatura
-  function montarVerso(card, escala) {
-    const lado = CARIMBO_MM / escala;               // em mm do desenho
-    const dir = 145 - 3, baixo = 102 - 3;           // limite interno da moldura do verso
-    const box = card.querySelector('.carimbo-verso'), leg = card.querySelector('.carimbo-leg');
-    const rules = card.querySelector('.rules');
-    Object.assign(box.style, { left: (dir - lado) + 'mm', top: (baixo - lado) + 'mm', width: lado + 'mm', height: lado + 'mm' });
-    const fonte = 6.5 / escala;                     // ~6,5 pt no papel
-    Object.assign(leg.style, { left: (dir - lado - 4) + 'mm', width: (lado + 8) + 'mm', fontSize: fonte + 'pt',
-                                top: (baixo - lado - fonte * 0.3528 * 1.6) + 'mm' });
-    rules.style.width = (dir - lado - 4 - 8) + 'mm';   // coluna de texto à esquerda do quadro
-    // assinatura eletrônica dentro do quadro (tamanhos em medida real impressa)
-    box.style.padding = (1 / escala) + 'mm';
-    const txt = card.querySelector('.ass-txt'), area = card.querySelector('.ass-area'), cur = card.querySelector('.ass-cursiva');
-    if (txt) txt.style.fontSize = (5 / escala) + 'pt';
-    if (cur) {
-      let fs = 18 / escala; cur.style.fontSize = fs + 'pt';
-      while (cur.scrollWidth > area.clientWidth && fs > 5 / escala) { fs -= 0.5 / escala; cur.style.fontSize = fs + 'pt'; }
-    }
-    // rodapé discreto: servidor responsável
-    const rod = card.querySelector('.rodape-servidor');
-    if (rod) Object.assign(rod.style, { left: '8mm', top: (baixo + 0.35) + 'mm', width: (dir - 8) + 'mm', fontSize: (5.5 / escala) + 'pt' });
-    let size = 10; rules.style.fontSize = size + 'pt';
-    while (rules.scrollHeight > rules.clientHeight + 1 && size > 5) { size -= 0.1; rules.style.fontSize = size.toFixed(1) + 'pt'; }
+  function ajustarTextos(root) {
+    // textos de uma linha: diminui a letra até caber
+    root.querySelectorAll('.nw').forEach(el => {
+      if (el.dataset.fs === undefined) el.dataset.fs = el.style.fontSize;   // guarda o tamanho original do modelo
+      el.style.fontSize = el.dataset.fs;
+      let s = parseFloat(getComputedStyle(el).fontSize);
+      while (el.scrollWidth > el.clientWidth + 1 && s > 3) { s -= 0.2; el.style.fontSize = s + 'px'; }
+    });
+    // órgão expedidor: no máximo duas linhas
+    root.querySelectorAll('.orgao').forEach(el => {
+      if (el.dataset.fs === undefined) el.dataset.fs = el.style.fontSize;
+      el.style.fontSize = el.dataset.fs; el.style.maxHeight = 'none';
+      let s = parseFloat(getComputedStyle(el).fontSize);
+      const limite = 7.4 * 96 / 25.4;
+      while (el.scrollHeight > limite + 1 && s > 5) { s -= 0.2; el.style.fontSize = s + 'px'; }
+      el.style.maxHeight = '7.4mm';
+    });
+    root.querySelectorAll('.ass-cursiva').forEach(el => {
+      let s = parseFloat(getComputedStyle(el).fontSize); const box = el.parentElement;
+      while (el.scrollWidth > box.clientWidth && s > 6) { s -= 0.3; el.style.fontSize = s + 'px'; }
+    });
   }
 
   function montar(fmt) {
-    const F = FORMATOS[fmt] || FORMATOS.a4, s = F.escala;
-    const [PW, PH] = F.pagina, W = CW * s, H = CH * s;
-    document.getElementById('pagina').textContent = `@page { size: ${F.page}; margin: 0; }`;
+    if (!FORMATOS[fmt]) fmt = 'a4';
+    document.getElementById('pagina').textContent = `@page { size: ${FORMATOS[fmt]}; margin: 0; }`;
     area.innerHTML = '';
+    const PW = 210, PH = 297;
     const pagina = () => { const p = document.createElement('div'); p.className = 'pagina'; p.style.width = PW + 'mm'; p.style.height = PH + 'mm'; area.appendChild(p); return p; };
+    const el = (pg, cls, css, html) => { const d = document.createElement('div'); d.className = cls; Object.assign(d.style, css); if (html) d.innerHTML = html; pg.appendChild(d); return d; };
     const colocar = (pg, card, x, y, girar) => {
-      const slot = document.createElement('div'); slot.className = 'slot';
-      Object.assign(slot.style, { left: x + 'mm', top: y + 'mm', width: W + 'mm', height: H + 'mm' });
-      const c = card.cloneNode(true);
-      c.style.transform = girar ? `translate(${W}mm, ${H}mm) rotate(180deg) scale(${s})` : `scale(${s})`;
-      slot.appendChild(c); pg.appendChild(slot);
-      if (fmt !== 'a6') {
-        const corte = document.createElement('div'); corte.className = 'corte-linha';
-        Object.assign(corte.style, { left: x + 'mm', top: y + 'mm', width: W + 'mm', height: H + 'mm' }); pg.appendChild(corte);
-      }
-      return c;
+      const slot = el(pg, 'slot' + (girar ? ' girado' : ''), { left: x + 'mm', top: y + 'mm' });
+      slot.appendChild(card.cloneNode(true));
     };
-    let cartoes = [];
+    const x = (PW - CW) / 2;
     if (fmt === 'a4') {
-      const pg = pagina(), x = (PW - W) / 2, y = (PH - 2 * H) / 2;
-      cartoes.push(colocar(pg, frente, x, y, false));
-      cartoes.push(colocar(pg, verso, x, y + H, true));
-      const d = document.createElement('div'); d.className = 'dobra';
-      Object.assign(d.style, { left: x + 'mm', top: (y + H) + 'mm', width: W + 'mm' });
-      d.innerHTML = '<span>dobrar aqui</span>'; pg.appendChild(d);
+      const pg = pagina(), y = (PH - 2 * CH) / 2;
+      colocar(pg, frente, x, y, false);
+      colocar(pg, verso, x, y + CH, true);
+      el(pg, 'corte', { left: x + 'mm', top: y + 'mm', width: CW + 'mm', height: 2 * CH + 'mm' });
+      el(pg, 'dobra', { left: x + 'mm', top: (y + CH) + 'mm', width: CW + 'mm' });
+      el(pg, 'guia', { left: (x + CW + 2) + 'mm', top: (y + CH - 1.5) + 'mm' }, '← dobrar aqui');
+      el(pg, 'guia', { left: x + 'mm', top: (y - 5) + 'mm' }, 'Recorte na linha pontilhada, dobre na tracejada (verso para trás) e plastifique. Imprima em tamanho real (100%).');
     } else {
-      const x = (PW - W) / 2, y = (PH - H) / 2;
-      cartoes.push(colocar(pagina(), frente, x, y, false));
-      cartoes.push(colocar(pagina(), verso, x, y, false));
+      const y = (PH - CH) / 2;
+      [frente, verso].forEach(card => {
+        const pg = pagina(); colocar(pg, card, x, y, false);
+        el(pg, 'corte', { left: x + 'mm', top: y + 'mm', width: CW + 'mm', height: CH + 'mm' });
+      });
     }
     ajustarTextos(area);
-    cartoes.filter(c => c.classList.contains('back')).forEach(c => montarVerso(c, s));
-    try { localStorage.setItem('fmtCartao', fmt); } catch (e) {}
+    try { localStorage.setItem('fmtCredencial', fmt); } catch (e) {}
   }
 
   async function carregar() {
-    if (!id) { area.innerHTML = '<div class="msg">Cartão não informado.</div>'; return; }
+    if (!id) { area.innerHTML = '<div class="msg">Credencial não informada.</div>'; return; }
     const [rb, rc, rm] = await Promise.all([fetch('/api/beneficiarios/' + id), fetch('/api/config'), fetch('/api/me')]);
     if (rb.status === 401) { location.href = '/'; return; }
     const b = await rb.json(), cfg = await rc.json();
-    if (!rb.ok) { area.innerHTML = '<div class="msg">' + (b.erro || 'Erro ao carregar') + '</div>'; return; }
+    if (!rb.ok) { area.innerHTML = '<div class="msg">' + esc(b.erro || 'Erro ao carregar') + '</div>'; return; }
     if (b.situacao === 'cassado' || b.situacao === 'suspenso') {
-      area.innerHTML = `<div class="msg"><b>Cartão ${b.situacao.toUpperCase()}.</b><br>Não é permitido imprimir um cartão nesta situação.</div>`;
+      area.innerHTML = `<div class="msg"><b>Credencial ${b.situacao === 'cassado' ? 'CASSADA' : 'SUSPENSA'}.</b><br>Não é permitido imprimir uma credencial nesta situação.</div>`;
       document.getElementById('imprimir').disabled = true; return;
     }
     const A = b.assinatura || {};
     const eu = rm.ok ? await rm.json() : {};
-    const pendente = b.exigir_assinatura !== false && !A.valida;
+    const exigir = b.exigir_assinatura !== false;
+    const pendente = exigir && !A.valida;
     document.body.classList.toggle('bloqueado', pendente);
     document.getElementById('imprimir').disabled = pendente;
-    document.getElementById('aviso-ass').innerHTML = !pendente ? '' : `<div class="aviso-assinatura"><b>Cartão aguardando assinatura eletrônica.</b>
-      ${eu.pode_assinar ? 'Confira o cartão abaixo e clique em <b>Assinar</b> (no alto). Depois da assinatura, o botão Imprimir é liberado.'
+    document.getElementById('aviso-ass').innerHTML = !pendente ? '' : `<div class="aviso-assinatura"><b>Credencial aguardando assinatura eletrônica.</b>
+      ${eu.pode_assinar ? 'Confira a credencial abaixo e clique em <b>Assinar</b> (no alto). Depois da assinatura, o botão Imprimir é liberado.'
                         : 'A impressão é liberada depois que o Secretário assinar (menu Assinaturas).'}</div>`;
     document.getElementById('assinar-box').hidden = !(pendente && eu.pode_assinar);
-    document.title = `Cartão nº ${b.registro} – ${b.nome}`;
-    document.getElementById('titulo').textContent = `${b.tipo === 'idoso' ? 'Idoso' : 'PcD'} · Nº ${b.registro} · ${b.nome} · ${b.via}ª via`;
+    const reg = b.registro_txt || String(b.registro);
+    document.title = `Credencial nº ${reg} – ${b.nome}`;
+    document.getElementById('titulo').textContent = `${b.tipo === 'idoso' ? 'Pessoa idosa' : 'PcD'} · Nº ${reg} · ${b.nome} · ${b.via}ª via`;
 
-    const tpl = document.getElementById(b.tipo === 'idoso' ? 't-idoso' : 't-pcd').content.cloneNode(true);
+    const S = b.servidor_responsavel;
+    const codServidor = S ? (S.matricula ? 'mat. ' + S.matricula : 'cód. ' + S.id) : '';
+    const assTxt = A.valida
+      ? `<div class="b" style="font-size:5.6pt">${esc(A.nome)}</div>` +
+        (A.cargo ? `<div style="font-size:5pt">${esc(A.cargo)}</div>` : '') +
+        `<div style="font-size:4.4pt;color:#222">Assinado eletronicamente em ${br(A.em)} às ${String(A.em).slice(11, 16)}</div>` +
+        `<div style="font-size:4.4pt;color:#222">Cód. de verificação ${esc(A.codigo)}${codServidor ? ' · Servidor emissor: ' + esc(codServidor) : ''}</div>`
+      : `<div style="font-size:5pt;font-style:italic">Nome e cargo do emissor</div>` +
+        (pendente ? '<div style="font-size:4.4pt;color:#b54708">aguardando assinatura eletrônica</div>' : '');
     const valores = {
-      registro: Number(b.registro).toLocaleString('pt-BR'), nome: b.nome, validade: br(b.validade), emissao: br(b.data_emissao),
-      orgao: cfg.orgao_expedidor || 'SSM', municipio: cfg.municipio || 'BAGÉ', uf: cfg.uf || 'RS',
+      registro: reg, nome: b.nome, emissao: br(b.data_emissao),
+      validade: b.tipo === 'pcd' && !indeterminada(b.validade) ? `<span class="lbl">VALIDADE:</span> ${br(b.validade)}` : '',
+      orgao: esc(cfg.orgao_expedidor || 'SSM'),
+      municipio: esc(`${cfg.municipio || 'BAGÉ'}/${cfg.uf || 'RS'}`),
+      item2: TEXTO_ITEM2[b.tipo], simbolo: SIMBOLO[b.tipo][0], marca: SIMBOLO[b.tipo][1],
+      'ass-img': A.valida ? (A.imagem ? `<img src="${A.imagem}" alt="">` : `<span class="ass-cursiva">${esc(A.nome)}</span>`)
+                          : (pendente ? '<span class="ass-pendente">AGUARDANDO ASSINATURA</span>' : ''),
+      'ass-txt': assTxt,
+      servidor: S ? esc(`Servidor responsável: ${S.nome}${S.matricula ? ' – Matrícula ' + S.matricula : ''}`) : '',
+      qr: QRSvg(b.link_qr, 'M', 0).replace('<svg ', '<svg style="width:100%;height:100%;display:block" '),
     };
-    tpl.querySelectorAll('[data-f]').forEach(el => {
-      const f = el.dataset.f;
-      if (f === 'qr') el.innerHTML = QRSvg(b.link_qr, 'M', 1);
-      else if (f === 'ass-img') el.innerHTML = !A.valida ? (pendente ? '<div class="ass-pendente">AGUARDANDO<br>ASSINATURA</div>' : '') : A.imagem ? `<img src="${A.imagem}" alt="">` : `<span class="ass-cursiva">${esc(A.nome)}</span>`;
-      else if (f === 'ass-txt') el.innerHTML = !A.valida ? '' :
-        `Assinado eletronicamente por<br><b>${esc(A.nome)}</b>${A.cargo ? '<br>' + esc(A.cargo) : ''}<br>em ${br(String(A.em).slice(0, 10))} às ${String(A.em).slice(11, 16)}<br>Cód. de verificação: ${esc(A.codigo)}`;
-      else if (f === 'ass-leg') el.textContent = A.valida ? 'ASSINATURA ELETRÔNICA' : 'CARIMBO E ASSINATURA';
-      else if (f === 'servidor') el.textContent = b.servidor_responsavel ?
-        `Servidor responsável: ${b.servidor_responsavel.nome}${b.servidor_responsavel.matricula ? ' – Matrícula ' + b.servidor_responsavel.matricula : ''}` : '';
-      else if (f in valores) el.textContent = valores[f];
-    });
-    tpl.querySelectorAll('[data-f="nome"]').forEach(el => { el.style.whiteSpace = 'nowrap'; el.style.overflow = 'hidden'; if (el.closest('.nome-frente')) el.style.display = 'block'; });
-    const cards = tpl.querySelectorAll('.card');
-    frente = cards[0]; verso = [...cards].find(c => c.classList.contains('back'));
+    const HTML = new Set(['validade', 'orgao', 'municipio', 'simbolo', 'marca', 'ass-img', 'ass-txt', 'servidor', 'qr']);
+    const montarTpl = tid => {
+      const t = document.getElementById(tid).content.cloneNode(true);
+      t.querySelectorAll('[data-f]').forEach(el => {
+        const v = valores[el.dataset.f] ?? '';
+        if (HTML.has(el.dataset.f)) el.innerHTML = v; else el.textContent = v;
+      });
+      return t.querySelector('.card');
+    };
+    frente = montarTpl('t-frente'); verso = montarTpl('t-verso');
 
-    let fmt = 'a4'; try { fmt = localStorage.getItem('fmtCartao') || 'a4'; } catch (e) {}
+    let fmt = 'a4'; try { fmt = localStorage.getItem('fmtCredencial') || 'a4'; } catch (e) {}
     if (!FORMATOS[fmt]) fmt = 'a4';
     document.querySelector(`input[name=fmt][value=${fmt}]`).checked = true;
     await (document.fonts ? document.fonts.ready : Promise.resolve());
     montar(fmt);
+    // a imagem da assinatura pode chegar depois: reajusta
+    area.querySelectorAll('img').forEach(im => im.complete || im.addEventListener('load', () => ajustarTextos(area), { once: true }));
   }
 
   const atual = () => (document.querySelector('input[name=fmt]:checked') || {}).value || 'a4';
   document.querySelectorAll('input[name=fmt]').forEach(r => r.addEventListener('change', () => montar(atual())));
-  document.getElementById('cores').addEventListener('change', e => document.body.classList.toggle('cores', e.target.checked));
-  // assinatura direto na tela do cartão (só aparece para quem pode assinar)
+
+  // assinatura direto na tela da credencial (só aparece para quem pode assinar)
   const $id = x => document.getElementById(x);
   $id('assinar').addEventListener('click', () => { $id('assinar').hidden = true; $id('assinar-form').hidden = false; $id('assinar-msg').textContent = ''; $id('assinar-senha').focus(); });
   $id('assinar-cancela').addEventListener('click', () => { $id('assinar-form').hidden = true; $id('assinar').hidden = false; $id('assinar-senha').value = ''; });
@@ -158,7 +155,7 @@
       const r = await fetch(`/api/beneficiarios/${id}/assinar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.erro || 'Não foi possível assinar.');
-      $id('assinar-box').hidden = true; $id('assinar-senha').value = '';
+      $id('assinar-box').hidden = true; $id('assinar-form').hidden = true; $id('assinar').hidden = false; $id('assinar-senha').value = '';
       await carregar();
     } catch (e) { $id('assinar-msg').textContent = e.message; $id('assinar-senha').select(); }
     finally { $id('assinar-ok').disabled = false; }

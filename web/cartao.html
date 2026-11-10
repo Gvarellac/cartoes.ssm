@@ -2,20 +2,15 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Impressão do cartão</title>
+<title>Impressão da credencial</title>
 <style id="pagina">@page { size: A4 portrait; margin: 0; }</style>
 <style>
-
-  /* Cartão no formato A6 deitado (148 x 105 mm) */
-  
+  /* Credencial de estacionamento – modelo da Res. Contran 965/2022, alterada pela Res. 1.012/2024 (Anexo III)
+     Tamanho oficial: 129 x 84,5 mm. Fundo branco, letras pretas, tarja e símbolo em azul. */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: #d6d6d6; }
-  body {
-    font-family: Arial, Helvetica, "Liberation Sans", FreeSans, sans-serif;
-    color: #111;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }
-  .narrow { font-family: "Arial Narrow", "Liberation Sans Narrow", "Roboto Condensed", "DejaVu Sans Condensed", Arial, sans-serif; font-stretch: condensed; }
+  body { font-family: Arial, Helvetica, "Liberation Sans", FreeSans, sans-serif; color: #111;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
   /* barra de ferramentas (não imprime) */
   .toolbar { position: sticky; top: 0; z-index: 10; background: #1f2933; color: #fff; padding: 10px 16px;
@@ -28,96 +23,61 @@
   .toolbar #assinar-msg { font-weight: bold; color: #fecdca; }
   .aviso-assinatura { max-width: 820px; margin: 14px auto 0; background: #fffaeb; border: 1px solid #fedf89; color: #7a2e0e;
     border-radius: 8px; padding: 10px 14px; font: 14px/1.4 Arial, sans-serif; }
-  .ass-pendente { display: flex; align-items: center; justify-content: center; height: 100%; text-align: center; font-weight: bold; color: #b54708; }
-  @media print { body.bloqueado #area, body.bloqueado .aviso-assinatura { display: none !important; } }
-  .label-card { font: bold 12px Arial, sans-serif; color: #444; margin: 22px auto 6px; width: 148mm; }
+  .msg { max-width: 600px; margin: 60px auto; font: 15px/1.5 Arial; text-align: center; }
 
-  .card { width: 148mm; height: 105mm; background: #fff; margin: 0 auto; position: relative; overflow: hidden;
-    break-after: page; page-break-after: always; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  /* páginas montadas pelo cartao.js */
+  .pagina { position: relative; background: #fff; margin: 18px auto; box-shadow: 0 2px 8px rgba(0,0,0,.25); overflow: hidden;
+            break-after: page; page-break-after: always; }
+  .pagina:last-child { break-after: auto; page-break-after: auto; }
+  .slot { position: absolute; width: 129mm; height: 84.5mm; }
+  .slot.girado .card { transform: rotate(180deg); }
+  .corte { position: absolute; outline: 0.2mm dotted #888; pointer-events: none; }
+  .dobra { position: absolute; height: 0; border-top: 0.25mm dashed #666; }
+  .guia { position: absolute; font: 6.5pt Arial; color: #777; white-space: nowrap; }
+
+  /* ===== CREDENCIAL ===== */
+  .card { width: 129mm; height: 84.5mm; position: relative; background: #fff; overflow: hidden; }
   .card > * { position: absolute; }
-
-  [contenteditable] { outline: 1px dashed #4a90d9; outline-offset: 1px; min-width: 15mm; min-height: 1em; display: inline-block; }
-  .hide-guides [contenteditable] { outline: none; }
-
-  .brasao { display: flex; align-items: center; justify-content: center; text-align: center;
-    border: 0.25mm dashed #aaa; border-radius: 1mm; font-size: 5pt; color: #999; line-height: 1.15; }
-  .brasao img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: transparent; }
-  .brasao.has-img { border: 0; }
-  .brasao img { filter: grayscale(1) contrast(1.15); }
-  .cores .brasao img { filter: none; }
-  .hide-guides .brasao:not(.has-img), .hide-guides .carimbo { border-color: transparent; color: transparent; }
-
-  .wm60 { object-fit: contain; }
+  .azul { background: #0b4ea2; }
   .b { font-weight: bold; }
-  .t { white-space: nowrap; line-height: 1; margin-top: -0.13em; }
-  .fit { transform-origin: 0 0; }
-  .val { font-weight: normal; font-size: 9pt; }
-  .center { text-align: center; }
-  /* nome do beneficiário na frente: maior e centralizado sobre a linha (diminui sozinho se for muito longo) */
-  .nome-frente { text-align: center; font-weight: bold; letter-spacing: .1mm; }
-  .nome-frente span { display: block; width: 100%; }
+  .c { text-align: center; }
+  .nw { white-space: nowrap; overflow: hidden; }
+  .lbl { font-weight: bold; }
 
-  /* ===== VERSO ===== */
-  .back .benef { left: 8mm; top: 4.6mm; width: 132mm; font-size: 9.6pt; font-weight: bold; display: flex; align-items: flex-end; white-space: nowrap; }
-  .back .benef .linha { flex: 1; border-bottom: 0.3mm solid #222; margin-left: 1.5mm; min-height: 5.6mm; padding-left: 1.5mm; font-weight: bold; font-size: 13pt; line-height: 1.15; overflow: hidden; }
-  .back .benef .linha { display: flex; align-items: flex-end; }
-  .back .benef .linha [data-f] { display: block; width: 100%; line-height: 1.1; padding-bottom: .3mm; }
-  .back .benef.reg { top: 11.4mm; width: 78mm; }
-  .back .benef .linha [contenteditable] { width: 97%; }
-  .back .titulo { left: 3mm; width: 142mm; top: 18.6mm; text-align: center; font-weight: bold; font-size: 10.5pt; letter-spacing: .5mm; }
-  .back .titulo::after { content: ""; display: block; width: 26mm; margin: 1.1mm auto 0; border-top: 0.3mm solid #222; }
-  .back .rules { left: 8mm; top: 25mm; width: 132mm; height: 74mm; font-size: 8.2pt; line-height: 1.24; }
-  .back .it { display: grid; grid-template-columns: 4.6mm 1fr; margin-top: .9mm; }
-  .back .it.sub { margin-left: 4.6mm; grid-template-columns: 6.2mm 1fr; margin-top: .25mm; }
-  .back .it .n { font-weight: bold; }
-  .back .it .tx { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
-  .back .it:first-child { margin-top: 0; }
+  /* frente */
+  .simbolo { left: 2.5mm; top: 2.5mm; width: 10mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
+  .tarja { left: 2.5mm; top: 14.5mm; width: 10mm; height: 67.5mm; display: flex; align-items: center; justify-content: center; }
+  .tarja div { transform: rotate(-90deg); color: #fff; font-size: 17pt; font-weight: bold; letter-spacing: 1.6mm; white-space: nowrap; }
+  .moldura { left: 14.5mm; top: 2.5mm; width: 112mm; height: 79.5mm; border: 0.3mm solid #8a8a8a; }
+  .marca { left: 44mm; top: 19.5mm; width: 56mm; height: 56mm; background: #e6e6e6; display: flex; align-items: center; justify-content: center; }
+  .marca img, .marca svg, .simbolo img, .simbolo svg { position: static; }
+  .ass-img { left: 47mm; top: 62.6mm; width: 50mm; height: 5.6mm; display: flex; align-items: flex-end; justify-content: center; }
+  .ass-img img { position: static; max-width: 100%; max-height: 100%; object-fit: contain; }
+  .ass-cursiva { font-family: "Brush Script MT", "Segoe Script", "Lucida Handwriting", "URW Chancery L", "Z003", cursive; font-size: 13pt; white-space: nowrap; }
+  .ass-pendente { font-size: 6pt; font-weight: bold; color: #b54708; letter-spacing: .3mm; }
+  .ass-txt { left: 38mm; top: 68.7mm; width: 68mm; text-align: center; line-height: 1.17; }
+  .ass-txt div { white-space: nowrap; overflow: hidden; }
+
+  /* verso */
+  .verso-borda { left: 1.5mm; top: 1.5mm; width: 126mm; height: 81.5mm; border: 0.3mm solid #444; }
+  .itens { left: 7mm; top: 17mm; width: 115mm; font-size: 7.3pt; line-height: 1.28; }
+  .itens .it { display: grid; grid-template-columns: 5mm 1fr; margin-top: 1.5mm; }
+  .itens .it:first-child { margin-top: 0; }
+  .itens .sub { margin-left: 5mm; grid-template-columns: 6mm 1fr; margin-top: .3mm; }
 
   @media print {
     html, body { background: #fff; }
-    .toolbar, .label-card, .spacer { display: none !important; }
-    .card { margin: 0; box-shadow: none; }
-    .card:last-of-type { break-after: auto; page-break-after: auto; }
-    [contenteditable] { outline: none !important; }
-    .brasao:not(.has-img), .carimbo { border-color: transparent !important; color: transparent !important; }
-  }
-
-  .qrbox { text-align: center; }
-  .qr svg { display: block; width: 100%; height: auto; }
-  .qrleg { font: bold 4.6pt Arial, sans-serif; letter-spacing: .1mm; margin-top: .4mm; }
-  /* páginas de impressão (montadas pelo cartao.js) */
-  .pagina { position: relative; background: #fff; margin: 0 auto 18px; box-shadow: 0 2px 8px rgba(0,0,0,.25); overflow: hidden;
-            break-after: page; page-break-after: always; }
-  .pagina:last-child { break-after: auto; page-break-after: auto; }
-  .slot { position: absolute; }
-  .slot .card { margin: 0; box-shadow: none; transform-origin: 0 0; position: absolute; left: 0; top: 0; break-after: auto; page-break-after: auto; }
-  .corte-linha { position: absolute; outline: 0.2mm dotted #999; pointer-events: none; }
-  .dobra { position: absolute; height: 0; border-top: 0.25mm dashed #777; }
-  .dobra span { position: absolute; right: 0; top: -3.4mm; font: 6.5pt Arial; color: #777; }
-  .carimbo-verso { border: 0.3mm solid #444; display: flex; align-items: flex-end; justify-content: center; }
-  .carimbo-verso { flex-direction: column; align-items: stretch; justify-content: flex-end; overflow: hidden; }
-  .carimbo-verso .ass-area { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-  .carimbo-verso .ass-area img { max-width: 94%; max-height: 100%; object-fit: contain; filter: grayscale(1) contrast(1.3); }
-  .cores .carimbo-verso .ass-area img { filter: none; }
-  .ass-cursiva { font-family: "Brush Script MT", "Segoe Script", "Lucida Handwriting", "URW Chancery L", "Z003", cursive; white-space: nowrap; color: #111; }
-  .carimbo-verso .ass-txt { text-align: center; line-height: 1.2; color: #111; }
-  .carimbo-verso .ass-txt:not(:empty) { border-top: 0.2mm solid #555; padding-top: .5mm; }
-  .rodape-servidor { white-space: nowrap; overflow: hidden; color: #444; }
-  .carimbo-leg { font: bold 5.4pt Arial, sans-serif; text-align: center; letter-spacing: .1mm; color: #222; white-space: nowrap; }
-  .msg { max-width: 600px; margin: 60px auto; font: 15px/1.5 Arial; text-align: center; }
-  .cores .brasao img { filter: none; }
-  @media print {
+    .toolbar, .aviso-assinatura { display: none !important; }
     .pagina { box-shadow: none; margin: 0; }
+    body.bloqueado #area { display: none !important; }
   }
 </style>
 </head>
 <body>
 <div class="toolbar">
-  <strong id="titulo">Cartão</strong>
-  <label><input type="radio" name="fmt" value="a4" checked> A4 em pé – frente e verso na mesma folha (recortar, dobrar e plastificar)</label>
-  <label><input type="radio" name="fmt" value="a4l"> A4 deitado – um lado por folha (cartão grande)</label>
-  <label><input type="radio" name="fmt" value="a6"> Papel A6</label>
-  <label><input type="checkbox" id="cores"> brasões coloridos</label>
+  <strong id="titulo">Credencial</strong>
+  <label><input type="radio" name="fmt" value="a4" checked> A4 – frente e verso na mesma folha para <b>dobrar</b> (recortar, dobrar e plastificar)</label>
+  <label><input type="radio" name="fmt" value="duplex"> A4 – impressora frente e verso (uma página para cada lado)</label>
   <button id="imprimir">Imprimir</button>
   <span id="assinar-box" hidden>
     <button id="assinar" class="assinar">Assinar</button>
@@ -142,127 +102,49 @@
 <div id="aviso-ass"></div>
 <div id="area"><div class="msg">Carregando…</div></div>
 
-<template id="t-pcd">
-<div class="folha">
-<div class="card corte pcd-front">
-  <div style="left:2.4mm; top:4mm; width:12.4mm; height:11.4mm; background:#1c1c1c; display:flex; align-items:center; justify-content:center;">
-    <svg style="width:9.6mm; height:9.6mm; color:#fff"><use href="#isa"/></svg>
-  </div>
-  <svg style="left:2.4mm; top:18.2mm; width:12.4mm; height:77.4mm" viewBox="0 0 124 774">
-    <rect width="124" height="774" fill="#1c1c1c"/>
-    <text transform="translate(92 742) rotate(-90)" textLength="688" lengthAdjust="spacingAndGlyphs"
-          font-family="Arial, Helvetica, 'Liberation Sans', FreeSans, sans-serif" font-weight="bold" font-size="94" fill="#fff">ESTACIONAMENTO</text>
-  </svg>
-  <div style="left:16.6mm; top:2.4mm; width:129.2mm; height:93.2mm; border:0.3mm solid #7d7d7d;"></div>
-  <div class="t fit b" data-w="113.2" style="left:24.6mm; top:97.9mm; font-size:11.4pt;">OBS: O USO DESTE CARTÃO É PESSOAL E INTRANSFERÍVEL</div>
-  <div style="left:36.6mm; top:16.6mm; width:72mm; height:71mm; background:#ebebeb; border:0.3mm solid #dedede;">
-    <svg style="position:absolute; left:6mm; top:5mm; width:60mm; height:62mm; color:#fff"><use href="#isa"/></svg>
-  </div>
-  <div class="brasao has-img" style="left:21mm; top:6.2mm; width:18mm; height:19.5mm;"><img src="/img/brasao-brasil.png" alt=""></div>
-  <div class="brasao has-img" style="left:121.8mm; top:5.8mm; width:17.6mm; height:20mm;"><img src="/img/brasao-bage.png" alt=""></div>
-  <div class="t fit b" data-w="79" style="left:41.8mm; top:7.6mm; font-size:12pt;">REPÚBLICA FEDERATIVA DO BRASIL</div>
-  <div class="t fit b" data-w="70" style="left:46.3mm; top:12.2mm; font-size:11pt;">CONSELHO NACIONAL DE TRÂNSITO</div>
-  <div class="t fit b" data-w="79" style="left:41.8mm; top:16.9mm; font-size:8.4pt;">SECRETARIA MUNICIPAL DE SEGURANÇA E MOBILIDADE URBANA</div>
-  <div class="t fit b" data-w="111.5" style="left:25.5mm; top:30.2mm; font-size:16.4pt;">ESTACIONAMENTO VAGA ESPECIAL</div>
-  <div class="t fit " data-w="67.9" style="left:45.6mm; top:37mm; font-size:8.7pt;">CONFORME RESOLUÇÃO Nº 304/08 DO CONTRAN</div>
-  <div class="t fit b" data-w="32.4" style="left:59.8mm; top:45.7mm; font-size:11.4pt;">Nº DO REGISTRO</div>
-  <div class="t" style="left:94mm; top:45.9mm; font-size:10.5pt;"><span data-f="registro"></span></div>
-  <div style="left:25.5mm; top:56mm; width:112.5mm; border-top:0.3mm solid #333;"></div>
-  <div class="t nome-frente" style="left:25.5mm; width:112.5mm; top:50.4mm; font-size:14pt;"><span data-f="nome"></span></div>
-  <div class="t fit b" data-w="22.1" style="left:36.7mm; top:61.7mm; font-size:11.6pt;">VALIDADE:</div>
-  <div class="t" style="left:60.5mm; top:61.8mm; font-size:10.5pt;"><span data-f="validade"></span></div>
-  <div class="t fit b" data-w="53.9" style="left:24mm; top:70mm; font-size:11.6pt;">UNIDADE DA FEDERAÇÃO:</div>
-  <div class="t" style="left:79.3mm; top:70.1mm; font-size:10.3pt;"><span data-f="uf"></span></div>
-  <div class="t fit b" data-w="23.2" style="left:23.7mm; top:78.9mm; font-size:11.6pt;">MUNICÍPIO:</div>
-  <div class="t" style="left:48.5mm; top:79mm; font-size:10.3pt;"><span data-f="municipio"></span></div>
-  <div class="t fit b" data-w="43.5" style="left:23.4mm; top:87.8mm; font-size:11.6pt;">ÓRGÃO EXPEDIDOR:</div>
-  <div class="t" style="left:68.9mm; top:87.9mm; font-size:10.3pt;"><span data-f="orgao"></span></div>
-  <div class="qrbox" style="left:113mm; top:60.5mm; width:27mm;"><div class="qr" data-f="qr"></div><div class="qrleg">CONSULTE A VALIDADE</div></div>
-</div>
-<div class="card corte back pcd-back">
-  <div style="left:3mm; top:3mm; width:142mm; height:99mm; border:0.3mm solid #555;"></div>
-  <div class="benef">NOME DO BENEFICIÁRIO:<span class="linha"><span data-f="nome"></span></span></div>
-  <div class="benef reg">Nº DO REGISTRO:<span class="linha"><span data-f="registro"></span></span></div>
-  <div class="titulo">REGRAS DE UTILIZAÇÃO</div>
-  <div class="rules">
-    <div class="it"><span class="n">1.</span><span class="tx">A autorização concedida por meio deste cartão somente terá validade se o mesmo for apresentado no original e preencher as seguintes condições:</span></div>
-    <div class="it sub"><span class="n">1.1</span><span class="tx">Estiver colocado sobre o painel do veículo, com frente voltada para cima;</span></div>
-    <div class="it sub"><span class="n">1.2</span><span class="tx">For apresentado à autoridade de trânsito ou aos seus agentes, sempre que solicitado.</span></div>
-    <div class="it"><span class="n">2.</span><span class="tx">Este cartão de autorização poderá ser recolhido e o ato da autorização suspenso ou cassado, a qualquer tempo, a critério do órgão de trânsito, especialmente se verificada irregularidade em sua utilização, considerando-se como tal, dentre outros:</span></div>
-    <div class="it sub"><span class="n">2.1</span><span class="tx">O empréstimo do cartão a terceiros;</span></div>
-    <div class="it sub"><span class="n">2.2</span><span class="tx">O uso de cópia do cartão, efetuada por qualquer processo;</span></div>
-    <div class="it sub"><span class="n">2.3</span><span class="tx">O porte do cartão com rasuras ou falsificado;</span></div>
-    <div class="it sub"><span class="n">2.4</span><span class="tx">O uso do cartão em desacordo com as disposições nele contidas ou na legislação pertinente, especialmente se constatado pelo agente que o veículo, por ocasião da utilização da vaga especial, não serviu para o transporte de deficiente físico;</span></div>
-    <div class="it sub"><span class="n">2.5</span><span class="tx">O uso do cartão com a validade vencida.</span></div>
-    <div class="it"><span class="n">3.</span><span class="tx">A presente autorização somente é válida para estacionar nas vagas devidamente sinalizadas com o Símbolo Internacional de Acesso, especialmente criadas pelo órgão de trânsito para esse fim.</span></div>
-    <div class="it"><span class="n">4.</span><span class="tx">Esta autorização também permite o uso em vagas de Estacionamento Rotativo Regulamentado, gratuito ou pago, sinalizadas com o Símbolo Internacional de Acesso, sendo obrigatória a utilização conjunta do Cartão de Estacionamento, bem como a obediência às suas normas de utilização.</span></div>
-    <div class="it"><span class="n">5.</span><span class="tx">O desrespeito ao disposto neste cartão de autorização, bem como às demais regras de trânsito e à sinalização local, sujeitará o infrator às medidas administrativas, penalidades e pontuações previstas em lei.</span></div>
-  </div>
-  <div class="carimbo-leg" data-f="ass-leg">CARIMBO E ASSINATURA</div>
-  <div class="carimbo-verso"><div class="ass-area" data-f="ass-img"></div><div class="ass-txt" data-f="ass-txt"></div></div>
-  <div class="rodape-servidor" data-f="servidor"></div>
-</div>
+<template id="t-frente">
+<div class="card frente">
+  <div class="azul simbolo" data-f="simbolo"></div>
+  <div class="azul tarja"><div>CREDENCIAL</div></div>
+  <div class="moldura"></div>
+  <div class="marca" data-f="marca"></div>
+  <img src="/img/brasao-brasil.png" alt="" style="left:18.5mm;top:4.5mm;width:14.5mm;height:13.5mm;object-fit:contain">
+  <div class="b c nw" style="left:33mm;top:5.6mm;width:73mm;font-size:10pt;line-height:1.25">REPÚBLICA FEDERATIVA DO BRASIL<br>CONSELHO NACIONAL DE TRÂNSITO</div>
+  <img src="/img/brasao-bage.png" alt="" style="left:106mm;top:4mm;width:16mm;height:12mm;object-fit:contain">
+  <div class="b c nw" style="left:20mm;top:22.6mm;width:102mm;font-size:13.5pt">ESTACIONAMENTO VAGA RESERVADA</div>
+  <div class="b c nw" style="left:20mm;top:28.6mm;width:102mm;font-size:6.5pt">LEI FEDERAL Nº 9.503/1997</div>
+  <div class="c nw" style="left:20mm;top:33.6mm;width:102mm;font-size:10pt"><span class="lbl">Nº DO REGISTRO :</span> <b data-f="registro"></b></div>
+  <div style="left:19mm;top:40mm;width:102.6mm;border-top:0.35mm solid #333"></div>
+  <div class="nw" style="left:25.8mm;top:45.4mm;width:40mm;font-size:8.5pt" data-f="validade"></div>
+  <div class="nw" style="left:67.8mm;top:45.4mm;width:56mm;font-size:8.5pt"><span class="lbl">DATA DE EMISSÃO:</span> <span data-f="emissao"></span></div>
+  <div class="orgao" style="left:25.8mm;top:51.2mm;width:96mm;font-size:8.5pt;line-height:1.2;max-height:7.4mm;overflow:hidden"><span class="lbl">ÓRGÃO EXPEDIDOR:</span> <span data-f="orgao"></span></div>
+  <div class="nw" style="left:25.8mm;top:59.6mm;width:40mm;font-size:8.5pt"><span class="lbl">MUNICÍPIO/UF:</span> <span data-f="municipio"></span></div>
+  <div class="ass-img" data-f="ass-img"></div>
+  <div style="left:50mm;top:68.3mm;width:44mm;border-top:0.25mm solid #333"></div>
+  <div class="ass-txt" data-f="ass-txt"></div>
+  <div style="left:106mm;top:58.5mm;width:16mm;height:16mm" data-f="qr"></div>
+  <div class="b c nw" style="left:20mm;top:78.4mm;width:102mm;font-size:8pt">VÁLIDA EM TODO O TERRITÓRIO NACIONAL</div>
 </div>
 </template>
-<template id="t-idoso">
-<div class="folha">
-<div class="card corte idoso-front">
-  <div style="left:2.9mm; top:0.8mm; width:143.2mm; height:96.3mm; border:0.3mm solid #777;"></div>
-  <div style="left:2.9mm; top:0.8mm; width:11.9mm; height:11.9mm; background:#1c1c1c; display:flex; align-items:center; justify-content:center;"><img src="/img/icone-60-branco.png" alt="" style="position:static; width:9.4mm; height:9.4mm;"></div>
-  <svg style="left:2.9mm; top:14.6mm; width:11.9mm; height:82.5mm" viewBox="0 0 119 825">
-    <rect width="119" height="825" fill="#1c1c1c"/>
-    <text transform="translate(88 792) rotate(-90)" textLength="758" lengthAdjust="spacingAndGlyphs"
-          font-family="Arial, Helvetica, 'Liberation Sans', FreeSans, sans-serif" font-weight="bold" font-size="90" fill="#fff">ESTACIONAMENTO</text>
-  </svg>
-  <div style="left:18.4mm; top:4.9mm; width:124.5mm; height:88.4mm; border:0.3mm solid #8a8a8a;"></div>
-  <img class="wm60" src="/img/marca-60.png" alt="" style="left:47mm; top:15.5mm; width:67mm; height:67mm;">
-  <div class="brasao has-img" style="left:21mm; top:6.2mm; width:18mm; height:19.5mm;"><img src="/img/brasao-brasil.png" alt=""></div>
-  <div class="brasao has-img" style="left:121.8mm; top:5.8mm; width:17.6mm; height:20mm;"><img src="/img/brasao-bage.png" alt=""></div>
-  <div class="t fit b" data-w="79" style="left:41.8mm; top:7.6mm; font-size:12pt;">REPÚBLICA FEDERATIVA DO BRASIL</div>
-  <div class="t fit b" data-w="70" style="left:46.3mm; top:12.2mm; font-size:11pt;">CONSELHO NACIONAL DE TRÂNSITO</div>
-  <div class="t fit b" data-w="79" style="left:41.8mm; top:16.9mm; font-size:8.4pt;">SECRETARIA MUNICIPAL DE SEGURANÇA E MOBILIDADE URBANA</div>
-  <div class="t fit b" data-w="111.5" style="left:25.5mm; top:30.2mm; font-size:16.4pt;">ESTACIONAMENTO VAGA ESPECIAL</div>
-  <div class="t fit " data-w="67.9" style="left:45.6mm; top:37mm; font-size:8.7pt;">CONFORME RESOLUÇÃO Nº 303/08 DO CONTRAN</div>
-  <div class="t fit b" data-w="28.8" style="left:53.9mm; top:47.1mm; font-size:9.2pt;">N° DO REGISTRO:</div>
-  <div class="t" style="left:83.3mm; top:47.1mm; font-size:9.6pt; font-weight:bold;"><span data-f="registro"></span></div>
-  <div style="left:22.8mm; top:56.4mm; width:112mm; border-top:0.25mm solid #333;"></div>
-  <div class="t nome-frente" style="left:22.8mm; width:112mm; top:50.8mm; font-size:14pt;"><span data-f="nome"></span></div>
-  <div class="t fit b" data-w="33" style="left:30mm; top:62.6mm; font-size:9.4pt;">DATA DE EMISSÃO:</div>
-  <div class="t" style="left:65.3mm; top:62mm; font-size:10.5pt; font-family:'Times New Roman', serif; font-style:italic; font-weight:bold;"><span data-f="emissao"></span></div>
-  <div class="t fit b" data-w="45" style="left:30mm; top:70.1mm; font-size:9.4pt;">UNIDADE DA FEDERAÇÃO:</div>
-  <div class="t" style="left:76.3mm; top:70.1mm; font-size:9.4pt;"><span data-f="uf"></span></div>
-  <div class="t fit b" data-w="20" style="left:30mm; top:77.7mm; font-size:9.4pt;">MUNICÍPIO:</div>
-  <div class="t" style="left:50.9mm; top:77.7mm; font-size:9.4pt;"><span data-f="municipio"></span></div>
-  <div class="t fit b" data-w="35.4" style="left:29.8mm; top:84.8mm; font-size:9.4pt;">ÓRGÃO EXPEDIDOR:</div>
-  <div class="t" style="left:66.2mm; top:84.8mm; font-size:9.4pt;"><span data-f="orgao"></span></div>
-  <div class="t b" style="left:58mm; letter-spacing:.2mm; top:88.6mm; font-size:9.4pt;">VALIDADE: <span data-f="validade"></span></div>
-  <div class="carimbo" style="left:91mm; top:57.5mm; width:23mm; height:23mm; border-radius:50%; border:0.25mm dashed #bbb; font-size:5pt; color:#aaa; display:flex; align-items:center; justify-content:center; text-align:center">área do<br>carimbo</div>
-  <div class="t fit b" data-w="113.2" style="left:15.6mm; top:99mm; font-size:11.4pt;">OBS: O USO DESTE CARTÃO É PESSOAL E INTRANSFERÍVEL</div>
-  <div class="qrbox" style="left:117mm; top:59.5mm; width:24mm;"><div class="qr" data-f="qr"></div><div class="qrleg">CONSULTE A VALIDADE</div></div>
-</div>
-<div class="card corte back idoso-back">
-  <div style="left:3mm; top:3mm; width:142mm; height:99mm; border:0.3mm solid #555;"></div>
-  <div class="benef">NOME DO BENEFICIÁRIO:<span class="linha"><span data-f="nome"></span></span></div>
-  <div class="benef reg">Nº DO REGISTRO:<span class="linha"><span data-f="registro"></span></span></div>
-  <div class="titulo">REGRAS DE UTILIZAÇÃO</div>
-  <div class="rules">
-    <div class="it"><span class="n">1.</span><span class="tx">A autorização concedida por meio deste cartão somente terá validade se o mesmo for apresentado no original e preencher as seguintes condições:</span></div>
-    <div class="it sub"><span class="n">1.1</span><span class="tx">Estiver colocado sobre o painel do veículo, com frente voltada para cima;</span></div>
-    <div class="it sub"><span class="n">1.2</span><span class="tx">For apresentado à autoridade de trânsito ou aos seus agentes, sempre que solicitado.</span></div>
-    <div class="it"><span class="n">2.</span><span class="tx">Este cartão de autorização poderá ser recolhido e o ato da autorização suspenso ou cassado, a qualquer tempo, a critério do órgão de trânsito, especialmente se verificada irregularidade em sua utilização, considerando-se como tal, dentre outros:</span></div>
-    <div class="it sub"><span class="n">2.1</span><span class="tx">O empréstimo do cartão a terceiros;</span></div>
-    <div class="it sub"><span class="n">2.2</span><span class="tx">O uso de cópia do cartão, efetuada por qualquer processo;</span></div>
-    <div class="it sub"><span class="n">2.3</span><span class="tx">O porte do cartão com rasuras ou falsificado;</span></div>
-    <div class="it sub"><span class="n">2.4</span><span class="tx">O uso do cartão em desacordo com as disposições nele contidas ou na legislação pertinente, especialmente se constatado pelo agente que o veículo, por ocasião da utilização da vaga especial, não serviu para o transporte do idoso ou portador de necessidades especiais;</span></div>
-    <div class="it sub"><span class="n">2.5</span><span class="tx">O uso do cartão com validade vencida (para o cartão de portador de necessidades especiais).</span></div>
-    <div class="it"><span class="n">3.</span><span class="tx">A presente autorização somente é válida para estacionar nas vagas devidamente sinalizadas com o Símbolo Internacional de Acesso, especialmente criadas pelo órgão de trânsito para esse fim.</span></div>
-    <div class="it"><span class="n">4.</span><span class="tx">Esta autorização também permite o uso em vagas de Estacionamento Rotativo Regulamentado, gratuito ou pago, sinalizadas com o Símbolo Internacional de Acesso, sendo obrigatória a utilização conjunta do Cartão de Estacionamento, bem como a obediência às suas normas de utilização.</span></div>
-    <div class="it"><span class="n">5.</span><span class="tx">O desrespeito ao disposto neste cartão de autorização, bem como às demais regras de trânsito e à sinalização local, sujeitará o infrator às medidas administrativas, penalidades e pontuações previstas em lei.</span></div>
+
+<template id="t-verso">
+<div class="card verso">
+  <div class="verso-borda"></div>
+  <div class="b c nw" style="left:3mm;top:3.6mm;width:123mm;font-size:9pt">NOME DO BENEFICIÁRIO:</div>
+  <div class="b c nw" style="left:3mm;top:7.6mm;width:123mm;font-size:12.5pt" data-f="nome"></div>
+  <div class="c nw" style="left:3mm;top:12.9mm;width:123mm;font-size:6.5pt"><b>Nº DO REGISTRO:</b> <span data-f="registro"></span></div>
+  <div class="itens">
+    <div class="it"><b>1.</b><span>Esta credencial deve ser utilizada:</span></div>
+    <div class="it sub"><span>1.1.</span><span>no original;</span></div>
+    <div class="it sub"><span>1.2.</span><span>para o transporte do beneficiário; e</span></div>
+    <div class="it sub"><span>1.3.</span><span>no painel do veículo, com a frente voltada para cima.</span></div>
+    <div class="it"><b>2.</b><span data-f="item2"></span></div>
+    <div class="it"><b>3.</b><span>Esta credencial não exime o beneficiário do pagamento de cobranças em estacionamento rotativo pago, estabelecimentos privados de uso coletivo e outras.</span></div>
+    <div class="it"><b>4.</b><span>Esta credencial deve ser apresentada à autoridade de trânsito ou seus agentes sempre que solicitada.</span></div>
+    <div class="it"><b>5.</b><span>Esta credencial pode ser suspensa ou cassada, a critério do órgão ou entidade de trânsito expedidor.</span></div>
+    <div class="it"><b>6.</b><span>O uso da vaga reservada sem credencial ou em desacordo ao nela disposto, sujeitará o infrator à aplicação das medidas administrativas, penalidades e pontuação previstas no art. 181, XX do Código de Trânsito Brasileiro (CTB).</span></div>
   </div>
-  <div class="carimbo-leg" data-f="ass-leg">CARIMBO E ASSINATURA</div>
-  <div class="carimbo-verso"><div class="ass-area" data-f="ass-img"></div><div class="ass-txt" data-f="ass-txt"></div></div>
-  <div class="rodape-servidor" data-f="servidor"></div>
-</div>
+  <div class="nw" style="left:7mm;top:79.3mm;width:115mm;font-size:4.6pt;color:#444" data-f="servidor"></div>
 </div>
 </template>
 

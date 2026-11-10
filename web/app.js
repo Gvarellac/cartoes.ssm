@@ -11,11 +11,13 @@
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const br = iso => { if (!iso) return '—'; const d = String(iso).slice(0, 10).split('-'); return d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : iso; };
   const brh = s => s ? `${br(s)} ${String(s).slice(11, 16)}` : '—';
-  const SIT = { ativo: 'VÁLIDO', vencido: 'VENCIDO', suspenso: 'SUSPENSO', cassado: 'CASSADO', invalido: 'NÃO RECONHECIDO' };
+  const SIT = { ativo: 'VÁLIDA', vencido: 'VENCIDA', suspenso: 'SUSPENSA', cassado: 'CASSADA', invalido: 'NÃO RECONHECIDA' };
   const badge = s => `<span class="badge s-${esc(s)}">${SIT[s] || esc(s)}</span>`;
   const tipoB = t => `<span class="badge t-${t}">${t === 'idoso' ? 'Idoso 60+' : 'PcD'}</span>`;
   const pode = (...p) => EU && p.includes(EU.perfil);
   const reg = n => (n === null || n === undefined || n === '') ? '' : Number(n).toLocaleString('pt-BR');
+  const regT = b => b.registro_txt || reg(b.registro);   // nº com o ano da emissão: 12.132/2026
+  const val = v => !v || String(v).startsWith('9999') ? 'Indeterminada' : br(v);   // Res. Contran 1.012/2024
 
   function toast(msg, erro) {
     const t = $('#toast'); t.textContent = msg; t.className = 'on' + (erro ? ' err' : '');
@@ -117,7 +119,7 @@
   function tabelaConsultas(lista, comNome = true) {
     if (!lista.length) return '<div class="vazio">Nenhuma consulta registrada ainda.</div>';
     return `<div class="tabela"><table><thead><tr><th>Data/hora</th>${comNome ? '<th>Beneficiário</th><th>Registro</th>' : ''}<th>Resultado</th><th>Agente</th><th>Origem</th></tr></thead><tbody>
-      ${lista.map(c => `<tr><td>${brh(c.data)}</td>${comNome ? `<td>${esc(c.nome || '— QR não reconhecido —')}</td><td>${esc(reg(c.registro))}</td>` : ''}
+      ${lista.map(c => `<tr><td>${brh(c.data)}</td>${comNome ? `<td>${esc(c.nome || '— QR não reconhecido —')}</td><td>${esc(c.registro_txt || reg(c.registro))}</td>` : ''}
       <td>${badge(c.resultado)}</td><td>${esc(c.agente || 'não identificado')}</td><td>${esc(c.origem || '')} ${esc(c.ip || '')}</td></tr>`).join('')}
       </tbody></table></div>`;
   }
@@ -139,15 +141,15 @@
       const l = await api('GET', `beneficiarios?q=${q}&tipo=${$('#ft').value}&situacao=${$('#fs').value}`);
       $('#res').innerHTML = !l.length ? '<div class="painel vazio">Nenhum beneficiário encontrado.</div>' :
         `<div class="tabela"><table><thead><tr><th>Registro</th><th>Nome</th><th>CPF</th><th>Tipo</th><th>Validade</th><th>Situação</th><th>Assinatura</th></tr></thead><tbody>
-        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${reg(b.registro)}</b></td><td>${esc(b.nome)}</td><td>${esc(b.cpf)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td>
-          <td style="white-space:nowrap">${b.status !== 'ativo' ? '—' : b.assinado_por ? '<span class="badge s-ativo">Assinado</span>' :
+        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${regT(b)}</b></td><td>${esc(b.nome)}</td><td>${esc(b.cpf)}</td><td>${tipoB(b.tipo)}</td><td>${val(b.validade)}</td><td>${badge(b.situacao)}</td>
+          <td style="white-space:nowrap">${b.status !== 'ativo' ? '—' : b.assinado_por ? '<span class="badge s-ativo">Assinada</span>' :
             (EU.pode_assinar ? `<button class="btn primario" data-assinar="${b.id}" style="padding:4px 10px">Assinar</button>` : '<span class="badge s-suspenso">Pendente</span>')}</td></tr>`).join('')}
         </tbody></table></div><p class="sub" style="margin-top:8px">${l.length} resultado(s)</p>`;
       $$('#res tr.link').forEach(tr => tr.addEventListener('click', () => location.hash = '#/b/' + tr.dataset.id));
       $$('#res [data-assinar]').forEach(bt => bt.addEventListener('click', async ev => {
         ev.stopPropagation();
         const b = l.find(x => x.id == bt.dataset.assinar);
-        const d = await dialogo('Assinar cartão', `<p>Você vai assinar eletronicamente o cartão nº <b>${reg(b.registro)}</b> de <b>${esc(b.nome)}</b>
+        const d = await dialogo('Assinar cartão', `<p>Você vai assinar eletronicamente o cartão nº <b>${regT(b)}</b> de <b>${esc(b.nome)}</b>
           como <b>${esc(EU.nome)}${EU.cargo ? ' – ' + esc(EU.cargo) : ''}</b>.</p><label>Confirme com a sua senha</label><input type="password" name="senha" autocomplete="current-password">`, 'Assinar');
         if (!d) return;
         try { await api('POST', `beneficiarios/${b.id}/assinar`, d); toast('Cartão assinado.'); buscar(); } catch (e) { toast(e.message, true); }
@@ -166,14 +168,14 @@
     const v = k => esc(b[k] ?? '');
     main.innerHTML = `
       <h1>${id ? 'Editar cadastro' : 'Novo cadastro'}</h1>
-      <p class="sub">${id ? `Registro nº ${reg(b.registro)} · ${esc(b.nome)}` : 'O nº de registro, a data de emissão e o QR Code são gerados automaticamente ao salvar.'}</p>
+      <p class="sub">${id ? `Registro nº ${regT(b)} · ${esc(b.nome)}` : 'O nº de registro, a data de emissão e o QR Code são gerados automaticamente ao salvar.'}</p>
       <form id="fb" autocomplete="off">
         <div class="painel"><h2>Tipo de cartão</h2>
           <div class="tipos">
             <label class="tipo"><input type="radio" name="tipo" value="idoso" ${b.tipo === 'idoso' ? 'checked' : ''} ${id ? 'disabled' : ''}>
-              <div><b>Idoso (60 anos ou mais)</b><span>Resolução CONTRAN nº 303/08 · validade ${esc(CFG.validade_anos_idoso)} anos</span></div></label>
+              <div><b>Idoso (60 anos ou mais)</b><span>Res. Contran 965/2022 (alterada pela 1.012/2024) · sem prazo de validade</span></div></label>
             <label class="tipo"><input type="radio" name="tipo" value="pcd" ${b.tipo === 'pcd' ? 'checked' : ''} ${id ? 'disabled' : ''}>
-              <div><b>Pessoa com deficiência</b><span>Resolução CONTRAN nº 304/08 · exige laudo médico</span></div></label>
+              <div><b>Pessoa com deficiência</b><span>Res. Contran 965/2022 · laudo com comprometimento de mobilidade · validade só se for temporária</span></div></label>
           </div>
         </div>
         <div class="painel"><h2>Dados pessoais</h2><div class="grade">
@@ -211,7 +213,7 @@
         </div></div>
         <div class="painel"><h2>Observações e validade</h2><div class="grade">
           <label class="c9">Observações internas<textarea name="observacoes">${v('observacoes')}</textarea></label>
-          ${id ? '' : `<label class="c3">Validade do cartão<input type="date" name="validade"><small>Em branco = ${esc(CFG.validade_anos_idoso)} anos (idoso) / ${esc(CFG.validade_anos_pcd)} anos (PcD). Para deficiência temporária, informe a data.</small></label>`}
+          ${id ? '' : `<label class="c3" id="campo-validade">Validade da credencial<input type="date" name="validade"><small>Só para deficiência <b>temporária</b>. Em branco = ${esc(CFG.validade_meses_pcd_temporaria || 12)} meses.</small></label>`}
         </div></div>
         <div class="erro" id="erro-form"></div>
         <div class="acoes"><button class="btn primario" type="submit">${id ? 'Salvar alterações' : 'Salvar e gerar cartão'}</button>
@@ -223,7 +225,9 @@
       const t = (f.querySelector('[name=tipo]:checked') || {}).value;
       $$('.tipo').forEach(l => l.classList.toggle('sel', l.querySelector('input').checked));
       $('#bloco-pcd').hidden = t !== 'pcd';
+      const cv = $('#campo-validade'); if (cv) cv.hidden = !(t === 'pcd' && f.laudo_temporario.value === '1');
     };
+    f.laudo_temporario.addEventListener('change', atualizaTipo);
     $$('[name=tipo]', f).forEach(r => r.addEventListener('change', atualizaTipo)); atualizaTipo();
     const idade = () => {
       const d = f.data_nascimento.value; if (!d) return $('#idade').textContent = '';
@@ -250,7 +254,7 @@
       const btn = f.querySelector('[type=submit]'); btn.disabled = true;
       try {
         if (id) { await api('PUT', 'beneficiarios/' + id, dados); toast('Cadastro atualizado.'); location.hash = '#/b/' + id; }
-        else { const r = await api('POST', 'beneficiarios', dados); toast(`Cartão nº ${reg(r.registro)} gerado.`); location.hash = '#/b/' + r.id; }
+        else { const r = await api('POST', 'beneficiarios', dados); toast(`Credencial nº ${r.registro_txt || reg(r.registro)} gerada.`); location.hash = '#/b/' + r.id; }
       } catch (err) { $('#erro-form').textContent = err.message; btn.disabled = false; }
     });
   }
@@ -270,13 +274,13 @@
     main.innerHTML = `
       <div class="cab">
         <div><h1>${esc(b.nome)}</h1>
-        <p class="sub">${tipoB(b.tipo)} &nbsp; Registro nº <b>${reg(b.registro)}</b> · ${b.via}ª via · ${badge(b.situacao)}</p></div>
+        <p class="sub">${tipoB(b.tipo)} &nbsp; Registro nº <b>${regT(b)}</b> · ${b.via}ª via · ${badge(b.situacao)}</p></div>
         ${b.link_qr ? `<div class="qrprev">${QRSvg(b.link_qr, 'M', 2)}<small>${esc(b.link_qr)}</small></div>` : ''}
       </div>
       ${avisos.join('')}
       <div class="acoes">
         ${EU.pode_assinar && precisaAssinar ? '<button class="btn primario" data-a="assinar">Assinar cartão</button>' : ''}
-        ${gestor && podeImprimir && b.situacao !== 'suspenso' && b.situacao !== 'cassado' ? `<a class="btn primario" href="/cartao.html?id=${b.id}" target="_blank">Imprimir cartão</a>` : ''}
+        ${gestor && podeImprimir && b.situacao !== 'suspenso' && b.situacao !== 'cassado' ? `<a class="btn primario" href="/cartao.html?id=${b.id}" target="_blank">Imprimir credencial</a>` : ''}
         ${gestor ? `<a class="btn" href="#/editar/${b.id}">Editar dados</a>` : ''}
         ${gestor && b.status !== 'cassado' ? '<button class="btn" data-a="renovar">Renovar</button><button class="btn" data-a="segunda-via">Emitir 2ª via</button>' : ''}
         ${gestor && b.status === 'ativo' ? '<button class="btn alerta" data-a="suspenso">Suspender</button>' : ''}
@@ -285,7 +289,7 @@
         ${gestor && b.laudo_arquivo ? `<a class="btn" href="/api/beneficiarios/${b.id}/laudo" target="_blank">Ver laudo</a>` : ''}
       </div>
       <div class="painel"><h2>Cartão</h2><div class="dados">
-        ${linha('Data de emissão', br(b.data_emissao))}${linha('Validade', br(b.validade))}${linha('Via', b.via + 'ª')}
+        ${linha('Data de emissão', br(b.data_emissao))}${linha('Validade', val(b.validade))}${linha('Via', b.via + 'ª')}
         ${linha('Órgão expedidor', CFG.orgao_expedidor)}
         ${linha('Assinatura eletrônica', A.valida ? `${A.nome}${A.cargo ? ' – ' + A.cargo : ''}, em ${brh(A.em)} · código ${A.codigo}` : 'aguardando assinatura')}
         ${b.servidor_responsavel ? linha('Servidor responsável', b.servidor_responsavel.nome + (b.servidor_responsavel.matricula ? ' – matrícula ' + b.servidor_responsavel.matricula : '')) : ''}
@@ -313,7 +317,7 @@
       const a = btn.dataset.a;
       let dados;
       if (a === 'assinar') {
-        dados = await dialogo('Assinar cartão', `<p>Você vai assinar eletronicamente o cartão nº <b>${reg(b.registro)}</b> de <b>${esc(b.nome)}</b>
+        dados = await dialogo('Assinar cartão', `<p>Você vai assinar eletronicamente o cartão nº <b>${regT(b)}</b> de <b>${esc(b.nome)}</b>
           como <b>${esc(EU.nome)}${EU.cargo ? ' – ' + esc(EU.cargo) : ''}</b>.</p><label>Confirme com a sua senha</label><input type="password" name="senha" autocomplete="current-password">`, 'Assinar');
         if (!dados) return;
         try { await api('POST', `beneficiarios/${id}/assinar`, dados); toast('Cartão assinado.'); detalhe(id); } catch (e) { toast(e.message, true); }
@@ -321,7 +325,8 @@
       }
       if (a === 'renovar') {
         dados = await dialogo('Renovar cartão', `<p>Gera nova data de emissão e nova validade. <b>O QR do cartão atual deixa de valer</b> – entregue o novo cartão impresso.</p>
-          <label>Nova validade <small>(em branco = ${esc(b.tipo === 'idoso' ? CFG.validade_anos_idoso : CFG.validade_anos_pcd)} anos a partir de hoje)</small></label><input type="date" name="validade">
+          ${b.tipo === 'pcd' && b.laudo_temporario ? `<label>Nova validade <small>(em branco = ${esc(CFG.validade_meses_pcd_temporaria || 12)} meses a partir de hoje)</small></label><input type="date" name="validade">`
+            : '<p><small>Credencial sem prazo de validade (Res. Contran 1.012/2024). A renovação gera uma nova emissão, com nova data e novo QR.</small></p>'}
           <p><small>O novo cartão precisará ser assinado de novo pelo Secretário.</small></p>`, 'Renovar');
         if (dados && !dados.validade) delete dados.validade;
       } else if (a === 'segunda-via') {
@@ -357,8 +362,8 @@
       <div class="acoes"><button class="btn primario" id="assinar-sel">Assinar selecionados</button>
         <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="todos" style="width:auto" checked> marcar todos</label></div>
       <div class="tabela"><table><thead><tr><th></th><th>Registro</th><th>Nome</th><th>Tipo</th><th>Emissão</th><th>Validade</th><th>Via</th></tr></thead><tbody>
-      ${l.map(b => `<tr><td><input type="checkbox" class="sel" value="${b.id}" checked style="width:auto"></td><td><b>${reg(b.registro)}</b></td>
-        <td><a href="#/b/${b.id}">${esc(b.nome)}</a></td><td>${tipoB(b.tipo)}</td><td>${br(b.data_emissao)}</td><td>${br(b.validade)}</td><td>${b.via}ª</td></tr>`).join('')}
+      ${l.map(b => `<tr><td><input type="checkbox" class="sel" value="${b.id}" checked style="width:auto"></td><td><b>${regT(b)}</b></td>
+        <td><a href="#/b/${b.id}">${esc(b.nome)}</a></td><td>${tipoB(b.tipo)}</td><td>${br(b.data_emissao)}</td><td>${val(b.validade)}</td><td>${b.via}ª</td></tr>`).join('')}
       </tbody></table></div>`}`;
     if (!l.length) return;
     $('#todos').addEventListener('change', e => $$('.sel').forEach(x => x.checked = e.target.checked));
@@ -390,7 +395,7 @@
       const l = await api('GET', `beneficiarios?q=${encodeURIComponent(q)}&tipo=${$('#ftp').value}`);
       $('#fres').innerHTML = !l.length ? '<div class="aviso r">Nenhum cartão encontrado com esse registro/nome. Possível cartão falso.</div>' :
         `<div class="tabela"><table><thead><tr><th>Registro</th><th>Nome</th><th>Tipo</th><th>Validade</th><th>Situação</th></tr></thead><tbody>
-        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${reg(b.registro)}</b></td><td>${esc(b.nome)}</td><td>${tipoB(b.tipo)}</td><td>${br(b.validade)}</td><td>${badge(b.situacao)}</td></tr>`).join('')}</tbody></table></div>`;
+        ${l.map(b => `<tr class="link" data-id="${b.id}"><td><b>${regT(b)}</b></td><td>${esc(b.nome)}</td><td>${tipoB(b.tipo)}</td><td>${val(b.validade)}</td><td>${badge(b.situacao)}</td></tr>`).join('')}</tbody></table></div>`;
       $$('#fres tr.link').forEach(tr => tr.addEventListener('click', () => location.hash = '#/b/' + tr.dataset.id));
     };
     $('#fb').addEventListener('click', buscar);
@@ -472,8 +477,7 @@
       <div class="painel"><h2>Numeração e validade</h2><div class="grade">
         <label class="c3">Próximo nº de registro – Idoso<input name="proximo_registro_idoso" type="number" min="1" value="${v('proximo_registro_idoso')}"><small>Número que o próximo cartão de idoso vai receber</small></label>
         <label class="c3">Próximo nº de registro – PcD<input name="proximo_registro_pcd" type="number" min="1" value="${v('proximo_registro_pcd')}"><small>Número que o próximo cartão de PcD vai receber</small></label>
-        <label class="c3">Validade padrão – Idoso (anos)<input name="validade_anos_idoso" type="number" min="1" value="${v('validade_anos_idoso')}"></label>
-        <label class="c3">Validade padrão – PcD (anos)<input name="validade_anos_pcd" type="number" min="1" value="${v('validade_anos_pcd')}"></label>
+        <label class="c3">Validade – PcD temporária (meses)<input name="validade_meses_pcd_temporaria" type="number" min="1" value="${v('validade_meses_pcd_temporaria')}"><small>Idoso e PcD permanente não têm validade (Res. Contran 1.012/2024)</small></label>
       </div></div>
       <div class="painel"><h2>Assinatura eletrônica</h2><div class="grade">
         <label class="c6">Exigir assinatura do Secretário antes de imprimir<select name="exigir_assinatura">
