@@ -271,6 +271,16 @@ def iniciar_banco():
         if alvo:
             print(f"  Res. 1.012/2024: {len(alvo)} credencial(is) passaram a ter validade indeterminada.")
 
+    # Redefinição de emergência da senha do admin (variável REDEFINIR_SENHA_ADMIN). Vale uma vez por valor.
+    nova_adm = (os.environ.get("REDEFINIR_SENHA_ADMIN") or "").strip()
+    if len(nova_adm) >= SENHA_MIN:
+        marca = hashlib.sha256(nova_adm.encode()).hexdigest()
+        if cfg(c, "reset_admin_aplicado") != marca:
+            c.execute("UPDATE usuarios SET senha=?, trocar_senha=1, ativo=1 WHERE login='admin'", (hash_senha(nova_adm),))
+            c.execute("DELETE FROM sessoes WHERE usuario_id IN (SELECT id FROM usuarios WHERE login='admin')")
+            c.execute("INSERT OR REPLACE INTO config(chave, valor) VALUES ('reset_admin_aplicado', ?)", (marca,))
+            print("  Senha do admin redefinida (provisória; troca obrigatória no próximo acesso).")
+
     # Usuários iniciais definidos pela variável USUARIOS_INICIAIS (JSON). Só cria quem ainda não existe.
     try:
         iniciais = json.loads(os.environ.get("USUARIOS_INICIAIS") or "[]")
@@ -681,11 +691,11 @@ class Handler(BaseHTTPRequestHandler):
         if r == "config":
             if m == "GET":
                 self.exigir(c)
-                return self.enviar(200, {x["chave"]: x["valor"] for x in c.execute("SELECT * FROM config WHERE chave NOT LIKE 'chave_%'")})
+                return self.enviar(200, {x["chave"]: x["valor"] for x in c.execute("SELECT * FROM config WHERE chave NOT LIKE 'chave_%' AND chave!='reset_admin_aplicado'")})
             self.exigir(c, "admin")
             d = self.corpo_json()
             for k, v in d.items():
-                if k.startswith("chave_") or k == "migracao_res1012":
+                if k.startswith("chave_") or k in ("migracao_res1012", "reset_admin_aplicado"):
                     continue
                 if k == "modo_assinatura" and v not in ("chancela", "individual"):
                     raise Erro(400, "Modo de assinatura inválido.")
